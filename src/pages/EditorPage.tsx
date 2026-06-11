@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useAppStore } from "@/stores/appStore";
+import { useToast } from "@/stores/toastStore";
 import { CATEGORIES, TAGS, DRAFTS } from "@/mock";
 import { OS_VERSIONS, MAC_MODELS } from "@/types";
 import Avatar from "@/components/ui/Avatar";
@@ -10,6 +11,8 @@ import Empty from "@/components/ui/Empty";
 import Badge from "@/components/ui/Badge";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import Modal from "@/components/ui/Modal";
+import Tooltip from "@/components/ui/Tooltip";
+import { useDropzone } from "react-dropzone";
 import {
   X,
   Bold,
@@ -39,8 +42,9 @@ import {
   FileText,
   GripVertical,
   FolderOpen,
+  Upload,
 } from "lucide-react";
-import { cn, formatTime, debounce } from "@/lib/utils";
+import { cn, formatTime, debounce, genId } from "@/lib/utils";
 import * as LucideIcons from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { Category, Tag as TagType } from "@/types";
@@ -71,7 +75,13 @@ export default function EditorPage() {
     setShowEditor,
     saveDraft,
     drafts: storeDrafts,
+    createPost,
+    setActivePost,
+    deleteDraft,
+    setActivePanel,
   } = useAppStore();
+
+  const toast = useToast();
 
   const initialDraft = DRAFTS.find((d) => d.id === editorDraftId) ||
     storeDrafts.find((d) => d.id === editorDraftId);
@@ -80,7 +90,7 @@ export default function EditorPage() {
   const [content, setContent] = useState(initialDraft?.content || "");
   const [categoryId, setCategoryId] = useState<string | undefined>(initialDraft?.categoryId);
   const [selectedTags, setSelectedTags] = useState<TagType[]>(
-    TAGS.filter((t) => initialDraft?.tagIds.includes(t.id))
+    TAGS.filter((t) => initialDraft?.tagIds?.includes(t.id))
   );
   const [customTagInput, setCustomTagInput] = useState("");
   const [customTagColor, setCustomTagColor] = useState(PRESET_COLORS[0]);
@@ -89,18 +99,29 @@ export default function EditorPage() {
   const [showPreview, setShowPreview] = useState(true);
   const [splitRatio, setSplitRatio] = useState(0.5);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(initialDraft ? new Date(initialDraft.savedAt) : null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [showSidebar, setShowSidebar] = useState(true);
   const [showDraftsDrawer, setShowDraftsDrawer] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [tagSearch, setTagSearch] = useState("");
-  const [uploadedImages, setUploadedImages] = useState<{ id: string; url: string; name: string; progress: number }[]>([]);
+  const [uploadedImages, setUploadedImages] = useState<{ id: string; url: string; name: string; progress: number }[]>(
+    (initialDraft?.images || []).map((url, idx) => ({
+      id: `img-${idx}`,
+      url,
+      name: `图片${idx + 1}`,
+      progress: 100,
+    }))
+  );
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
+  const [showImagePanel, setShowImagePanel] = useState(false);
+  const [keepDraftOnDiscard, setKeepDraftOnDiscard] = useState(true);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagePanelRef = useRef<HTMLDivElement>(null);
 
   const allCategories = useMemo(() => {
     const result: Category[] = [];
@@ -114,7 +135,7 @@ export default function EditorPage() {
   const selectedCategory = allCategories.find((c) => c.id === categoryId);
   const drafts = storeDrafts.length > 0 ? storeDrafts : DRAFTS;
 
-  const canPublish = title.trim() && content.trim() && categoryId;
+  const canPublish = !!(title.trim() && content.trim() && categoryId);
   const wordCount = content.replace(/\s/g, "").length;
 
   const debouncedSave = useMemo(
@@ -192,6 +213,195 @@ export default function EditorPage() {
       ta.setSelectionRange(pos, pos + selected.length);
     }, 0);
   };
+
+  const insertTextAtCursor = useCallback((text: string) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const newContent = content.slice(0, start) + text + content.slice(end);
+    setContent(newContent);
+    setTimeout(() => {
+      ta.focus();
+      const pos = start + text.length;
+      ta.setSelectionRange(pos, pos);
+    }, 0);
+  }, [content]);
+
+  const simulateUploadProgress = useCallback((imageId: string) => {
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress = Math.min(100, progress + 15);
+      setUploadedImages((prev) =>
+        prev.map((img) =>
+          img.id === imageId ? { ...img, progress } : img
+        )
+      );
+      if (progress >= 100) {
+        clearInterval(interval);
+        setUploadedImages((prev) => {
+          const img = prev.find((i) => i.id === imageId);
+          if (img) {
+            setTimeout(() => {
+              insertTextAtCursor(`![${img.name}](${img.url})`);
+            }, 0);
+          }
+          return prev;
+        });
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, [insertTextAtCursor]);
+
+  const handleFiles = useCallback((files: FileList | File[]) => {
+    const fileArray = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    fileArray.forEach((file) => {
+      const id = genId();
+      const url = URL.createObjectURL(file);
+      const newImage = { id, url, name: file.name, progress: 0 };
+      setUploadedImages((prev) => [...prev, newImage]);
+      simulateUploadProgress(id);
+    });
+  }, [simulateUploadProgress]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      handleFiles(files);
+    }
+  }, [handleFiles]);
+
+  const deleteImage = useCallback((imageId: string) => {
+    setUploadedImages((prev) => {
+      const img = prev.find((i) => i.id === imageId);
+      if (img) {
+        const pattern = new RegExp(`!\\[${img.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\(${img.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)\\n?`, 'g');
+        setContent((c) => c.replace(pattern, ""));
+        URL.revokeObjectURL(img.url);
+      }
+      return prev.filter((i) => i.id !== imageId);
+    });
+  }, []);
+
+  const insertImageToContent = useCallback((image: { id: string; url: string; name: string }) => {
+    insertTextAtCursor(`![${image.name}](${image.url})`);
+    setShowImagePanel(false);
+  }, [insertTextAtCursor]);
+
+  const handleImageToolClick = useCallback(() => {
+    if (uploadedImages.length > 0) {
+      setShowImagePanel((prev) => !prev);
+    } else {
+      fileInputRef.current?.click();
+    }
+  }, [uploadedImages.length]);
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      handleFiles(e.target.files);
+      e.target.value = "";
+    }
+  }, [handleFiles]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop: handleFiles,
+    accept: { "image/*": [] },
+    noClick: true,
+    noKeyboard: true,
+  });
+
+  const handleSaveDraft = useCallback(() => {
+    setAutoSaveStatus("saving");
+    const result = saveDraft({
+      id: editorDraftId,
+      title,
+      content,
+      categoryId,
+      tagIds: selectedTags.map((t) => t.id),
+      osVersion,
+      macModel,
+      images: uploadedImages.map((i) => i.url),
+    });
+    setTimeout(() => {
+      setLastSavedAt(new Date());
+      setAutoSaveStatus("saved");
+      setTimeout(() => setAutoSaveStatus("idle"), 2000);
+    }, 300);
+    return result;
+  }, [editorDraftId, title, content, categoryId, selectedTags, osVersion, macModel, uploadedImages, saveDraft]);
+
+  const handlePublish = useCallback(() => {
+    if (!canPublish) return;
+
+    const postId = createPost({
+      title: title.trim(),
+      content: content.trim(),
+      categoryId: categoryId!,
+      tagIds: selectedTags.map((t) => t.id),
+      osVersion,
+      macModel,
+      images: uploadedImages.map((i) => i.url),
+      draftId: editorDraftId,
+    });
+
+    if (editorDraftId) {
+      deleteDraft(editorDraftId);
+    }
+
+    setShowEditor(false);
+    setActivePanel("feed");
+    setActivePost(postId);
+    toast.success("发布成功", "你的帖子已成功发布");
+  }, [canPublish, title, content, categoryId, selectedTags, osVersion, macModel, uploadedImages, editorDraftId, createPost, deleteDraft, setShowEditor, setActivePanel, setActivePost, toast]);
+
+  const handleDiscard = useCallback(() => {
+    if (editorDraftId && !keepDraftOnDiscard) {
+      deleteDraft(editorDraftId);
+    }
+    setShowDiscardConfirm(false);
+    setShowEditor(false);
+  }, [editorDraftId, keepDraftOnDiscard, deleteDraft, setShowEditor]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey;
+
+      if (isMod && e.key === "s") {
+        e.preventDefault();
+        handleSaveDraft();
+      }
+
+      if (isMod && e.key === "Enter") {
+        e.preventDefault();
+        if (canPublish) {
+          handlePublish();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleSaveDraft, handlePublish, canPublish]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (imagePanelRef.current && !imagePanelRef.current.contains(e.target as Node)) {
+        setShowImagePanel(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const addTag = (tag: TagType) => {
     if (!selectedTags.find((t) => t.id === tag.id)) {
@@ -299,6 +509,16 @@ export default function EditorPage() {
                 setCategoryId(d.categoryId);
                 setOsVersion(d.osVersion);
                 setMacModel(d.macModel);
+                setSelectedTags(TAGS.filter((t) => d.tagIds?.includes(t.id)));
+                setUploadedImages(
+                  (d.images || []).map((url, idx) => ({
+                    id: `img-${idx}-${Date.now()}`,
+                    url,
+                    name: `图片${idx + 1}`,
+                    progress: 100,
+                  }))
+                );
+                setLastSavedAt(new Date(d.savedAt));
               },
             }))}
             placement="bottom-right"
@@ -335,10 +555,10 @@ export default function EditorPage() {
           </div>
 
           <div
-            className="flex-shrink-0 mx-6 py-2 flex items-center gap-1 border-y"
+            className="flex-shrink-0 mx-6 py-2 flex items-center gap-1 border-y relative"
             style={{ borderColor: "var(--app-border)" }}
           >
-            {TOOLBAR_ITEMS.map((tool) => {
+            {TOOLBAR_ITEMS.filter((t) => t.key !== "image").map((tool) => {
               const Icon = tool.icon;
               return (
                 <button
@@ -356,6 +576,73 @@ export default function EditorPage() {
                 </button>
               );
             })}
+
+            <div ref={imagePanelRef} className="relative">
+              <button
+                type="button"
+                onClick={handleImageToolClick}
+                title="图片"
+                className={cn(
+                  "w-8 h-8 rounded-md flex items-center justify-center transition-all",
+                  "hover:bg-black/5 dark:hover:bg-white/5",
+                  showImagePanel && "bg-black/5 dark:bg-white/5"
+                )}
+                style={{ color: "var(--app-text-secondary)" }}
+              >
+                <Image className="w-4 h-4" />
+              </button>
+
+              {showImagePanel && (
+                <div
+                  className="absolute top-full left-0 mt-1 p-2 rounded-lg shadow-mac z-50 min-w-[200px]"
+                  style={{
+                    background: "var(--app-surface)",
+                    border: "1px solid var(--app-border)",
+                  }}
+                >
+                  <div className="text-xs font-medium mb-2 px-1" style={{ color: "var(--app-text-secondary)" }}>
+                    已上传图片
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-[180px] overflow-y-auto">
+                    {uploadedImages.map((img) => (
+                      <button
+                        key={img.id}
+                        type="button"
+                        onClick={() => insertImageToContent(img)}
+                        className="relative w-12 h-12 rounded overflow-hidden hover:ring-2 hover:ring-[var(--app-accent)] transition-all"
+                        title={img.name}
+                      >
+                        <img src={img.url} alt={img.name} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2 pt-2 border-t" style={{ borderColor: "var(--app-border)" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowImagePanel(false);
+                        fileInputRef.current?.click();
+                      }}
+                      className="w-full text-xs py-1.5 rounded-md flex items-center justify-center gap-1 hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                      style={{ color: "var(--app-text-secondary)" }}
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      上传新图片
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleFileInputChange}
+            />
+
             <div className="w-px h-5 mx-1" style={{ background: "var(--app-border)" }} />
             <button
               type="button"
@@ -377,15 +664,18 @@ export default function EditorPage() {
 
           <div ref={splitContainerRef} className="flex-1 min-h-0 flex overflow-hidden">
             <div
-              className="flex-1 min-w-0 flex flex-col overflow-hidden"
+              className="flex-1 min-w-0 flex flex-col overflow-hidden relative"
               style={{ flex: showPreview ? `${splitRatio * 100}%` : "1 1 100%" }}
+              {...getRootProps()}
             >
+              <input {...getInputProps()} />
               <textarea
                 ref={textareaRef}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                placeholder="开始写点什么吧... 支持 Markdown 语法"
-                className="flex-1 w-full resize-none outline-none px-6 py-4 font-mono text-sm leading-relaxed"
+                onPaste={handlePaste}
+                placeholder="开始写点什么吧... 支持 Markdown 语法，可拖拽或粘贴图片"
+                className="flex-1 w-full resize-none outline-none px-6 py-4 font-mono text-sm leading-relaxed relative z-10"
                 style={{
                   background: "transparent",
                   color: "var(--app-text-primary)",
@@ -393,9 +683,28 @@ export default function EditorPage() {
                 }}
               />
 
+              {isDragActive && (
+                <div
+                  className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none"
+                  style={{
+                    background: "color-mix(in srgb, var(--app-accent) 10%, transparent)",
+                    border: "2px dashed var(--app-accent)",
+                    margin: "8px",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <div className="text-center">
+                    <Upload className="w-12 h-12 mx-auto mb-2" style={{ color: "var(--app-accent)" }} />
+                    <p className="text-sm font-medium" style={{ color: "var(--app-text-primary)" }}>
+                      释放鼠标上传图片
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {uploadedImages.length > 0 && (
                 <div
-                  className="flex-shrink-0 px-6 py-3 border-t flex items-center gap-3 flex-wrap"
+                  className="flex-shrink-0 px-6 py-3 border-t flex items-center gap-3 flex-wrap relative z-10"
                   style={{ borderColor: "var(--app-border)" }}
                 >
                   {uploadedImages.map((img) => (
@@ -409,13 +718,20 @@ export default function EditorPage() {
                         alt={img.name}
                         className="w-full h-full object-cover"
                       />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() =>
-                            setUploadedImages(uploadedImages.filter((i) => i.id !== img.id))
-                          }
+                          onClick={() => insertImageToContent(img)}
                           className="w-7 h-7 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
+                          title="插入到正文"
+                        >
+                          <Image className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteImage(img.id)}
+                          className="w-7 h-7 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
+                          title="删除图片"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -429,6 +745,11 @@ export default function EditorPage() {
                               background: "var(--app-accent)",
                             }}
                           />
+                        </div>
+                      )}
+                      {img.progress < 100 && (
+                        <div className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded bg-black/50 text-white">
+                          {img.progress}%
                         </div>
                       )}
                     </div>
@@ -512,10 +833,16 @@ export default function EditorPage() {
           >
             <div className="flex-1 min-h-0 overflow-y-auto">
               <div className="p-4 border-b" style={{ borderBottomColor: "var(--app-border)" }}>
-                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--app-text-primary)" }}>
+                <h3 className="text-sm font-semibold mb-2 flex items-center gap-2" style={{ color: "var(--app-text-primary)" }}>
                   <Layers className="w-4 h-4" style={{ color: "var(--app-accent)" }} />
                   选择分区 <span style={{ color: "var(--app-danger)" }}>*</span>
                 </h3>
+                {!categoryId && (
+                  <p className="text-xs mb-2 flex items-center gap-1" style={{ color: "var(--app-danger)" }}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--app-danger)" }} />
+                    请选择一个分区
+                  </p>
+                )}
                 <div className="space-y-0.5 max-h-56 overflow-y-auto pr-1">
                   {CATEGORIES.map((cat) => {
                     const hasChildren = cat.children && cat.children.length > 0;
@@ -817,23 +1144,7 @@ export default function EditorPage() {
             variant="secondary"
             size="sm"
             leftIcon={<Save className="w-4 h-4" />}
-            onClick={() => {
-              setAutoSaveStatus("saving");
-              saveDraft({
-                id: editorDraftId,
-                title,
-                content,
-                categoryId,
-                tagIds: selectedTags.map((t) => t.id),
-                osVersion,
-                macModel,
-                images: uploadedImages.map((i) => i.url),
-              });
-              setTimeout(() => {
-                setLastSavedAt(new Date());
-                setAutoSaveStatus("saved");
-              }, 300);
-            }}
+            onClick={handleSaveDraft}
           >
             保存草稿
           </Button>
@@ -874,25 +1185,37 @@ export default function EditorPage() {
             placement="top-right"
           />
 
-          <Button
-            variant="primary"
-            size="md"
-            rightIcon={<Send className="w-4 h-4" />}
-            disabled={!canPublish}
-            onClick={() => {
-              if (canPublish) {
-                setShowEditor(false);
-              }
-            }}
+          <Tooltip
+            content={
+              !canPublish ? (
+                <div className="space-y-0.5">
+                  {!title.trim() && <div>· 请填写标题</div>}
+                  {!content.trim() && <div>· 请填写内容</div>}
+                  {!categoryId && <div>· 请选择分区</div>}
+                </div>
+              ) : (
+                "点击发布帖子"
+              )
+            }
+            disabled={!!canPublish}
+            placement="top"
           >
-            发布
-            <span
-              className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded opacity-80"
-              style={{ background: "rgba(255,255,255,0.2)" }}
+            <Button
+              variant="primary"
+              size="md"
+              rightIcon={<Send className="w-4 h-4" />}
+              disabled={!canPublish}
+              onClick={handlePublish}
             >
-              ⌘↵
-            </span>
-          </Button>
+              发布
+              <span
+                className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded opacity-80"
+                style={{ background: "rgba(255,255,255,0.2)" }}
+              >
+                ⌘↵
+              </span>
+            </Button>
+          </Tooltip>
         </div>
       </div>
 
@@ -907,10 +1230,7 @@ export default function EditorPage() {
             </Button>
             <Button
               variant="danger"
-              onClick={() => {
-                setShowDiscardConfirm(false);
-                setShowEditor(false);
-              }}
+              onClick={handleDiscard}
               leftIcon={<Trash2 className="w-4 h-4" />}
             >
               确认放弃
@@ -926,6 +1246,26 @@ export default function EditorPage() {
             <Clock className="w-3 h-3" />
             上次保存于 {formatTime(lastSavedAt.toISOString())}
           </p>
+        )}
+        {(editorDraftId || (title || content)) && (
+          <div className="mt-4 p-3 rounded-lg" style={{ background: "var(--app-surface-secondary)" }}>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={keepDraftOnDiscard}
+                onChange={(e) => setKeepDraftOnDiscard(e.target.checked)}
+                className="w-4 h-4 rounded"
+              />
+              <span className="text-sm" style={{ color: "var(--app-text-primary)" }}>
+                保留草稿
+              </span>
+            </label>
+            <p className="text-xs mt-1.5 ml-6" style={{ color: "var(--app-text-tertiary)" }}>
+              {keepDraftOnDiscard
+                ? "放弃后可在草稿箱中继续编辑"
+                : "放弃后草稿将被永久删除"}
+            </p>
+          </div>
         )}
       </Modal>
 

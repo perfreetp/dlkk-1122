@@ -53,6 +53,8 @@ export default function FavoritesPage() {
     removeFavoriteItem,
     moveFavoriteItem,
     setActivePost,
+    getPostFavoriteGroups,
+    toggleFavoriteInGroup,
   } = useAppStore();
 
   const groups = storeGroups.length > 0 ? storeGroups : MOCK_GROUPS;
@@ -72,6 +74,8 @@ export default function FavoritesPage() {
   const [movingItemIds, setMovingItemIds] = useState<string[]>([]);
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [showGroupManageModal, setShowGroupManageModal] = useState(false);
+  const [managePostId, setManagePostId] = useState<string>("");
 
   const activeGroup = groups.find((g) => g.id === activeFavoriteGroupId);
   const activeGroupItems = useMemo(() => {
@@ -670,6 +674,32 @@ export default function FavoritesPage() {
                         )}
                       </div>
                     </div>
+
+                    {post && (
+                      <div
+                        className="mt-3 pt-3 flex items-center justify-between"
+                        style={{ borderTop: "1px solid var(--app-border)" }}
+                      >
+                        <span
+                          className="text-[11px]"
+                          style={{ color: "var(--app-text-tertiary)" }}
+                        >
+                          已收藏到 {getPostFavoriteGroups(post.id).length} 个分组
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setManagePostId(post.id);
+                            setShowGroupManageModal(true);
+                          }}
+                          className="text-[11px] px-2 py-1 rounded-md transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                          style={{ color: "var(--app-accent)" }}
+                        >
+                          管理分组
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -837,6 +867,81 @@ export default function FavoritesPage() {
               )}
             </button>
           ))}
+        </div>
+      </Modal>
+
+      <Modal
+        open={showGroupManageModal}
+        onClose={() => {
+          setShowGroupManageModal(false);
+          setManagePostId("");
+        }}
+        title={
+          <div className="flex items-center gap-2">
+            <FolderPlus className="w-5 h-5" style={{ color: "var(--app-accent)" }} />
+            管理收藏分组
+          </div>
+        }
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowGroupManageModal(false);
+                setManagePostId("");
+              }}
+            >
+              关闭
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-1.5 max-h-80 overflow-y-auto -mx-1 px-1">
+          {groups.filter((g) => g.id !== "fg1").map((g) => {
+            const isInGroup = managePostId ? getPostFavoriteGroups(managePostId).includes(g.id) : false;
+            return (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => {
+                  if (managePostId) {
+                    toggleFavoriteInGroup(managePostId, g.id);
+                  }
+                }}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all",
+                  isInGroup
+                    ? "font-medium shadow-sm"
+                    : "hover:bg-black/5 dark:hover:bg-white/5"
+                )}
+                style={{
+                  background: isInGroup ? "var(--app-accent)" : "transparent",
+                  color: isInGroup ? "#fff" : "var(--app-text-secondary)",
+                }}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{
+                    background: isInGroup ? "rgba(255,255,255,0.9)" : g.color,
+                  }}
+                />
+                <span className="flex-1 text-left">{g.name}</span>
+                <span
+                  className="text-[10px]"
+                  style={{
+                    color: isInGroup
+                      ? "rgba(255,255,255,0.8)"
+                      : "var(--app-text-tertiary)",
+                  }}
+                >
+                  {g.itemCount} 项
+                </span>
+                {isInGroup && (
+                  <CheckSquare className="w-4 h-4 flex-shrink-0" />
+                )}
+              </button>
+            );
+          })}
         </div>
       </Modal>
     </div>

@@ -1,7 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useAppStore } from "@/stores/appStore";
-import { POSTS, REPLIES, FAVORITE_GROUPS, USERS } from "@/mock";
-import { OS_VERSIONS, MAC_MODELS } from "@/types";
+import { USERS } from "@/mock";
 import Avatar from "@/components/ui/Avatar";
 import Tag from "@/components/ui/Tag";
 import Badge from "@/components/ui/Badge";
@@ -9,6 +8,7 @@ import Button from "@/components/ui/Button";
 import Dropdown from "@/components/ui/Dropdown";
 import type { DropdownItem } from "@/components/ui/Dropdown";
 import Empty from "@/components/ui/Empty";
+import Modal from "@/components/ui/Modal";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import {
   ArrowLeft,
@@ -28,10 +28,12 @@ import {
   Image,
   Send,
   MoreHorizontal,
-  ChevronUp,
   Crown as CrownIcon,
   AtSign,
   Smile,
+  Plus,
+  Trash2,
+  Settings,
 } from "lucide-react";
 import { cn, formatNumber, formatTime, getOSVersionLabel, getMacModelLabel } from "@/lib/utils";
 import type { Reply as ReplyType, Post } from "@/types";
@@ -40,10 +42,14 @@ function ReplyItem({
   reply,
   postId,
   onReply,
+  isHighlighted,
+  onFloorClick,
 }: {
   reply: ReplyType;
   postId: string;
   onReply: (r: ReplyType) => void;
+  isHighlighted?: boolean;
+  onFloorClick?: (floor: number) => void;
 }) {
   const { toggleBlockUser, setReportTarget, setProfileUserId } = useAppStore();
   const [liked, setLiked] = useState(reply.isLiked || false);
@@ -86,10 +92,14 @@ function ReplyItem({
   return (
     <div
       id={`floor-${reply.floor}`}
-      className="scroll-mt-20 rounded-xl p-5 transition-all group"
+      className={cn(
+        "scroll-mt-20 rounded-xl p-5 transition-all group",
+        isHighlighted && "ring-2 ring-[var(--app-accent)] animate-pulse"
+      )}
       style={{
         background: "var(--app-surface)",
-        border: "1px solid var(--app-border)",
+        border: `1px solid ${isHighlighted ? "var(--app-accent)" : "var(--app-border)"}`,
+        boxShadow: isHighlighted ? "0 0 0 3px color-mix(in srgb, var(--app-accent) 20%, transparent)" : "none",
       }}
     >
       <div className="flex items-start gap-3">
@@ -147,14 +157,15 @@ function ReplyItem({
             </div>
 
             <div className="flex items-center gap-1 flex-shrink-0">
-              <a
-                href={`#floor-${reply.floor}`}
+              <button
+                type="button"
+                onClick={() => onFloorClick?.(reply.floor)}
                 className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors hover:bg-black/5 dark:hover:bg-white/5"
                 style={{ color: "var(--app-text-tertiary)" }}
-                title={`复制楼层链接`}
+                title={`跳转到 #${reply.floor} 楼`}
               >
                 #{reply.floor} 楼
-              </a>
+              </button>
 
               <Dropdown
                 trigger={
@@ -211,8 +222,9 @@ function ReplyItem({
                 >
                   @{reply.replyToAuthor.nickname}
                 </button>
-                <a
-                  href={`#floor-${reply.replyToFloor}`}
+                <button
+                  type="button"
+                  onClick={() => reply.replyToFloor && onFloorClick?.(reply.replyToFloor)}
                   className="text-[10px] px-1.5 py-0.5 rounded"
                   style={{
                     background: "var(--app-border)",
@@ -220,7 +232,7 @@ function ReplyItem({
                   }}
                 >
                   #{reply.replyToFloor}
-                </a>
+                </button>
               </div>
               <p
                 className="text-xs line-clamp-2"
@@ -276,24 +288,54 @@ export default function PostDetailPage() {
     activePostId,
     setActivePost,
     likePost,
-    favoritePost,
     setFeedFilter,
     setProfileUserId,
     setReportTarget,
     toggleBlockUser,
     currentUser,
+    getRepliesByPostId,
+    getFilteredReplies,
+    getPostById,
+    isPostFavorited,
+    getPostFavoriteGroups,
+    toggleFavoriteInGroup,
+    unfavoritePost,
+    createFavoriteGroup,
+    favoriteGroups,
+    addReply,
+    getBlockedUserIds,
+    setActivePanel,
   } = useAppStore();
 
   const post: Post | undefined = useMemo(
-    () => POSTS.find((p) => p.id === activePostId) || POSTS[0],
-    [activePostId]
+    () => getPostById(activePostId || ""),
+    [activePostId, getPostById]
   );
 
-  const replies = REPLIES[post?.id || ""] || [];
+  const allReplies = useMemo(
+    () => getRepliesByPostId(post?.id || ""),
+    [post?.id, getRepliesByPostId]
+  );
+
+  const replies = useMemo(
+    () => getFilteredReplies(allReplies),
+    [allReplies, getFilteredReplies]
+  );
+
+  const favorited = post ? isPostFavorited(post.id) : false;
+  const postFavGroups = post ? getPostFavoriteGroups(post.id) : [];
+
   const [replyTo, setReplyTo] = useState<ReplyType | null>(null);
   const [replyContent, setReplyContent] = useState("");
   const [showMentionList, setShowMentionList] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
+  const [highlightedFloor, setHighlightedFloor] = useState<number | null>(null);
+  const [showBlockedPost, setShowBlockedPost] = useState(false);
+  const [showNewGroupModal, setShowNewGroupModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const repliesEndRef = useRef<HTMLDivElement>(null);
+
+  const isAuthorBlocked = post ? getBlockedUserIds().includes(post.authorId) : false;
 
   const matchedUsers = USERS.filter((u) =>
     mentionFilter
@@ -318,6 +360,40 @@ export default function PostDetailPage() {
     const newValue = replyContent.replace(/@([\u4e00-\u9fa5\w]*)$/, `@${nickname} `);
     setReplyContent(newValue);
     setShowMentionList(false);
+  };
+
+  const handleFloorClick = (floor: number) => {
+    const el = document.getElementById(`floor-${floor}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      setHighlightedFloor(floor);
+      setTimeout(() => setHighlightedFloor(null), 2000);
+    }
+  };
+
+  const handleSendReply = () => {
+    if (!post || !replyContent.trim()) return;
+
+    addReply(post.id, {
+      content: replyContent.trim(),
+      replyToId: replyTo?.id,
+      replyToFloor: replyTo?.floor,
+      replyToAuthor: replyTo?.author,
+    });
+
+    setReplyContent("");
+    setReplyTo(null);
+
+    setTimeout(() => {
+      repliesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+  };
+
+  const handleCreateGroup = () => {
+    if (!newGroupName.trim()) return;
+    createFavoriteGroup(newGroupName.trim());
+    setNewGroupName("");
+    setShowNewGroupModal(false);
   };
 
   if (!post) {
@@ -355,7 +431,7 @@ export default function PostDetailPage() {
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-4 pb-32 max-w-4xl mx-auto">
           <article
-            className="rounded-2xl p-6 mb-6"
+            className="rounded-2xl p-6 mb-6 relative overflow-hidden"
             style={{
               background: "var(--app-surface)",
               border: `1px solid ${
@@ -365,6 +441,26 @@ export default function PostDetailPage() {
               }`,
             }}
           >
+            {isAuthorBlocked && !showBlockedPost && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center backdrop-blur-md bg-[var(--app-surface)]/80">
+                <Ban className="w-10 h-10 mb-3" style={{ color: "var(--app-text-tertiary)" }} />
+                <p className="text-sm font-medium mb-2" style={{ color: "var(--app-text-primary)" }}>
+                  该用户已被屏蔽
+                </p>
+                <p className="text-xs mb-4" style={{ color: "var(--app-text-tertiary)" }}>
+                  你已屏蔽 {post.author.nickname}，内容已隐藏
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowBlockedPost(true)}
+                >
+                  查看内容
+                </Button>
+              </div>
+            )}
+
+            <div className={cn(isAuthorBlocked && !showBlockedPost && "opacity-30 pointer-events-none select-none")}>
             <div className="flex items-start gap-4 mb-5">
               <button
                 type="button"
@@ -530,41 +626,91 @@ export default function PostDetailPage() {
                         type="button"
                         className={cn(
                           "inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all",
-                          post.isFavorited
+                          favorited
                             ? "shadow-sm"
                             : "hover:bg-black/5 dark:hover:bg-white/5"
                         )}
                         style={{
-                          background: post.isFavorited
+                          background: favorited
                             ? "color-mix(in srgb, var(--app-warning) 15%, transparent)"
                             : "transparent",
-                          color: post.isFavorited
+                          color: favorited
                             ? "var(--app-warning)"
                             : "var(--app-text-secondary)",
                         }}
                       >
-                        <Bookmark className={cn("w-4.5 h-4.5", post.isFavorited ? "fill-current" : "")} />
+                        <Bookmark className={cn("w-4.5 h-4.5", favorited ? "fill-current" : "")} />
                         <span>{formatNumber(post.favoriteCount)}</span>
                       </button>
                     }
-                    items={FAVORITE_GROUPS.map<DropdownItem>((g) => ({
-                      key: g.id,
-                      label: (
-                        <span className="flex items-center gap-2">
-                          <span
-                            className="w-2 h-2 rounded-full"
-                            style={{ background: g.color }}
-                          />
-                          <span>{g.name}</span>
-                          <span className="ml-auto text-[10px]" style={{ color: "var(--app-text-tertiary)" }}>
-                            {g.itemCount}
+                    items={[
+                      ...(favorited
+                        ? [
+                            {
+                              key: "remove-all",
+                              label: (
+                                <span className="flex items-center gap-2">
+                                  <Trash2 className="w-4 h-4" />
+                                  <span>从所有分组移除</span>
+                                </span>
+                              ),
+                              danger: true,
+                              onClick: () => unfavoritePost(post.id),
+                            } as DropdownItem,
+                            {
+                              key: "manage",
+                              label: (
+                                <span className="flex items-center gap-2">
+                                  <Settings className="w-4 h-4" />
+                                  <span>管理分组</span>
+                                </span>
+                              ),
+                              onClick: () => setActivePanel("favorites"),
+                            } as DropdownItem,
+                            { key: "div1", label: "", divider: true } as DropdownItem,
+                          ]
+                        : []),
+                      ...favoriteGroups.map<DropdownItem>((g) => ({
+                        key: g.id,
+                        label: (
+                          <span className="flex items-center gap-2">
+                            <span
+                              className="w-4 h-4 rounded border flex items-center justify-center"
+                              style={{
+                                borderColor: postFavGroups.includes(g.id) ? g.color : "var(--app-border)",
+                                background: postFavGroups.includes(g.id) ? g.color : "transparent",
+                              }}
+                            >
+                              {postFavGroups.includes(g.id) && (
+                                <span className="text-white text-[10px]">✓</span>
+                              )}
+                            </span>
+                            <span
+                              className="w-2 h-2 rounded-full"
+                              style={{ background: g.color }}
+                            />
+                            <span>{g.name}</span>
+                            <span className="ml-auto text-[10px]" style={{ color: "var(--app-text-tertiary)" }}>
+                              {g.itemCount}
+                            </span>
                           </span>
-                        </span>
-                      ),
-                      onClick: () => favoritePost(post.id, g.id),
-                    }))}
+                        ),
+                        onClick: () => toggleFavoriteInGroup(post.id, g.id),
+                      })),
+                      { key: "div2", label: "", divider: true } as DropdownItem,
+                      {
+                        key: "new-group",
+                        label: (
+                          <span className="flex items-center gap-2" style={{ color: "var(--app-accent)" }}>
+                            <Plus className="w-4 h-4" />
+                            <span>新建分组</span>
+                          </span>
+                        ),
+                        onClick: () => setShowNewGroupModal(true),
+                      },
+                    ]}
                     placement="bottom-left"
-                    menuClassName="min-w-[180px]"
+                    menuClassName="min-w-[220px]"
                   />
 
                   <button
@@ -631,6 +777,38 @@ export default function PostDetailPage() {
                   <span>{formatNumber(post.favoriteCount)} 收藏</span>
                 </span>
               </div>
+
+              {favorited && postFavGroups.length > 0 && (
+                <div
+                  className="mt-4 pt-4 text-xs"
+                  style={{ borderTop: "1px solid var(--app-border)" }}
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span style={{ color: "var(--app-text-tertiary)" }}>
+                      已收藏到 {postFavGroups.length} 个分组：
+                    </span>
+                    {favoriteGroups
+                      .filter((g) => postFavGroups.includes(g.id))
+                      .map((g) => (
+                        <span
+                          key={g.id}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]"
+                          style={{
+                            background: `${g.color}15`,
+                            color: g.color,
+                          }}
+                        >
+                          <span
+                            className="w-1.5 h-1.5 rounded-full"
+                            style={{ background: g.color }}
+                          />
+                          {g.name}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
             </div>
           </article>
 
@@ -679,6 +857,8 @@ export default function PostDetailPage() {
                     setReplyTo(r);
                     setReplyContent(`@${r.author.nickname} `);
                   }}
+                  isHighlighted={highlightedFloor === reply.floor}
+                  onFloorClick={handleFloorClick}
                 />
               ))
             ) : (
@@ -688,6 +868,7 @@ export default function PostDetailPage() {
                 description="快来抢沙发，发表第一条回复吧！"
               />
             )}
+            <div ref={repliesEndRef} />
           </div>
         </div>
       </div>
@@ -713,9 +894,14 @@ export default function PostDetailPage() {
                   @{replyTo.author.nickname}
                 </button>
                 的
-                <a href={`#floor-${replyTo.floor}`} className="mx-1">
+                <button
+                  type="button"
+                  onClick={() => handleFloorClick(replyTo.floor)}
+                  className="mx-1 font-medium underline underline-offset-2"
+                  style={{ color: "var(--app-accent)" }}
+                >
                   #{replyTo.floor} 楼
-                </a>
+                </button>
               </span>
               <button
                 type="button"
@@ -805,8 +991,7 @@ export default function PostDetailPage() {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       if (replyContent.trim()) {
-                        setReplyContent("");
-                        setReplyTo(null);
+                        handleSendReply();
                       }
                     }
                   }}
@@ -855,12 +1040,7 @@ export default function PostDetailPage() {
                 size="md"
                 rightIcon={<Send className="w-4 h-4" />}
                 disabled={!replyContent.trim()}
-                onClick={() => {
-                  if (replyContent.trim()) {
-                    setReplyContent("");
-                    setReplyTo(null);
-                  }
-                }}
+                onClick={handleSendReply}
                 className="h-[80px]"
                 style={{ height: "80px" }}
               >
@@ -870,6 +1050,56 @@ export default function PostDetailPage() {
           </div>
         </div>
       </div>
+
+      <Modal
+        open={showNewGroupModal}
+        onClose={() => {
+          setShowNewGroupModal(false);
+          setNewGroupName("");
+        }}
+        title="新建收藏分组"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setShowNewGroupModal(false);
+                setNewGroupName("");
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleCreateGroup}
+              disabled={!newGroupName.trim()}
+            >
+              创建
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <label className="text-sm" style={{ color: "var(--app-text-secondary)" }}>
+            分组名称
+          </label>
+          <input
+            type="text"
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+            placeholder="输入分组名称"
+            className="mac-input w-full"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newGroupName.trim()) {
+                handleCreateGroup();
+              }
+            }}
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

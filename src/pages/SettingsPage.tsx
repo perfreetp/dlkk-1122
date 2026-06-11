@@ -224,6 +224,9 @@ export default function SettingsPage() {
     preferences: { blockedItems, shortcuts, theme, accentColor, fontSize, sidebarWidth, showAvatars, showSignatures },
     setShortcut,
     resetShortcuts,
+    addBlockKeyword,
+    removeBlockKeyword,
+    getBlockedKeywords,
   } = useAppStore();
 
   const [activeNav, setActiveNav] = useState<SettingsTab>(
@@ -239,16 +242,14 @@ export default function SettingsPage() {
   const [whoCanDM, setWhoCanDM] = useState("all");
   const [whoCanMention, setWhoCanMention] = useState("all");
   const [keywordInput, setKeywordInput] = useState("");
-  const [localBlockedKeywords, setLocalBlockedKeywords] = useState<string[]>([
-    "广告",
-    "垃圾内容",
-  ]);
   const [showAddBlockModal, setShowAddBlockModal] = useState(false);
   const [blockSearch, setBlockSearch] = useState("");
   const [notifGrouping, setNotifGrouping] = useState("type");
   const [loadCount, setLoadCount] = useState(20);
   const [scrollThreshold, setScrollThreshold] = useState(80);
   const [imgLoadMode, setImgLoadMode] = useState("always");
+
+  const blockedKeywords = getBlockedKeywords();
 
   const blockedUsers = blockedItems.filter((b) => b.type === "user");
   const blockedUsersList = blockedUsers
@@ -313,12 +314,14 @@ export default function SettingsPage() {
   };
 
   const handleRemoveKeyword = (kw: string) => {
-    setLocalBlockedKeywords(localBlockedKeywords.filter((k) => k !== kw));
+    removeBlockKeyword(kw);
   };
 
   const handleAddKeyword = () => {
-    if (keywordInput.trim() && !localBlockedKeywords.includes(keywordInput.trim())) {
-      setLocalBlockedKeywords([...localBlockedKeywords, keywordInput.trim()]);
+    if (keywordInput.trim() && !blockedKeywords.some(
+      (k) => k.toLowerCase() === keywordInput.trim().toLowerCase()
+    )) {
+      addBlockKeyword(keywordInput.trim());
       setKeywordInput("");
     }
   };
@@ -831,8 +834,8 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {localBlockedKeywords.length > 0 ? (
-              localBlockedKeywords.map((kw) => (
+            {blockedKeywords.length > 0 ? (
+              blockedKeywords.map((kw) => (
                 <Tag
                   key={kw}
                   color="#FF3B30"

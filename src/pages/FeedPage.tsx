@@ -1,11 +1,13 @@
 import { useMemo } from "react";
 import { useAppStore } from "@/stores/appStore";
-import { POSTS, TAGS } from "@/mock";
+import { TAGS } from "@/mock";
 import { OS_VERSIONS, MAC_MODELS, type SortType, type Post } from "@/types";
 import Avatar from "@/components/ui/Avatar";
 import Tag from "@/components/ui/Tag";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
+import Dropdown from "@/components/ui/Dropdown";
+import type { DropdownItem } from "@/components/ui/Dropdown";
 import Empty from "@/components/ui/Empty";
 import Skeleton from "@/components/ui/Skeleton";
 import Tabs from "@/components/ui/Tabs";
@@ -22,6 +24,9 @@ import {
   Flame,
   Sparkles,
   Zap,
+  Ban,
+  Settings,
+  Trash2,
 } from "lucide-react";
 import { cn, formatNumber, formatTime } from "@/lib/utils";
 
@@ -32,7 +37,10 @@ const SORT_OPTIONS: { key: SortType; label: string; icon: any }[] = [
 ];
 
 function PostCard({ post, showPin = true }: { post: Post; showPin?: boolean }) {
-  const { likePost, favoritePost, setActivePost, setFeedFilter } = useAppStore();
+  const { likePost, setActivePost, setFeedFilter, setActivePanel, isPostFavorited, toggleFavoriteInGroup, getPostFavoriteGroups, unfavoritePost, favoriteGroups } = useAppStore();
+
+  const favorited = isPostFavorited(post.id);
+  const postFavGroups = getPostFavoriteGroups(post.id);
 
   return (
     <article
@@ -110,6 +118,7 @@ function PostCard({ post, showPin = true }: { post: Post; showPin?: boolean }) {
                   onClick={(e) => {
                     e.stopPropagation();
                     setFeedFilter({ tagId: tag.id });
+                    setActivePanel("feed");
                   }}
                 >
                   {tag.name}
@@ -162,27 +171,81 @@ function PostCard({ post, showPin = true }: { post: Post; showPin?: boolean }) {
                 <MessageSquare className="w-3.5 h-3.5" />
                 {formatNumber(post.replyCount)}
               </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  favoritePost(post.id, "fg1");
-                }}
-                className={cn(
-                  "inline-flex items-center gap-1 text-xs transition-colors",
-                  post.isFavorited
-                    ? ""
-                    : "hover:text-[var(--app-warning)]"
-                )}
-                style={{
-                  color: post.isFavorited ? "var(--app-warning)" : "var(--app-text-tertiary)",
-                }}
-              >
-                <Bookmark
-                  className={cn("w-3.5 h-3.5", post.isFavorited ? "fill-current" : "")}
-                />
-                {formatNumber(post.favoriteCount)}
-              </button>
+              <Dropdown
+                trigger={
+                  <button
+                    type="button"
+                    onClick={(e) => e.stopPropagation()}
+                    className={cn(
+                      "inline-flex items-center gap-1 text-xs transition-colors",
+                      favorited ? "" : "hover:text-[var(--app-warning)]"
+                    )}
+                    style={{
+                      color: favorited ? "var(--app-warning)" : "var(--app-text-tertiary)",
+                    }}
+                  >
+                    <Bookmark
+                      className={cn("w-3.5 h-3.5", favorited ? "fill-current" : "")}
+                    />
+                    {formatNumber(post.favoriteCount)}
+                  </button>
+                }
+                items={
+                  favorited
+                    ? [
+                        {
+                          key: "remove-all",
+                          label: "从所有分组移除",
+                          icon: <Trash2 className="w-4 h-4" />,
+                          danger: true,
+                          onClick: () => unfavoritePost(post.id),
+                        },
+                        {
+                          key: "manage",
+                          label: "管理分组",
+                          icon: <Settings className="w-4 h-4" />,
+                          onClick: () => {
+                            setActivePanel("favorites");
+                          },
+                        },
+                        { key: "div1", label: "", divider: true } as DropdownItem,
+                        ...favoriteGroups.map<DropdownItem>((g) => ({
+                          key: g.id,
+                          label: (
+                            <span className="flex items-center gap-2">
+                              <span
+                                className="w-2 h-2 rounded-full"
+                                style={{ background: g.color }}
+                              />
+                              <span>{g.name}</span>
+                              {postFavGroups.includes(g.id) && (
+                                <span className="ml-auto" style={{ color: "var(--app-accent)" }}>✓</span>
+                              )}
+                            </span>
+                          ),
+                          onClick: () => toggleFavoriteInGroup(post.id, g.id),
+                        })),
+                      ]
+                    : favoriteGroups.map<DropdownItem>((g) => ({
+                        key: g.id,
+                        label: (
+                          <span className="flex items-center gap-2">
+                            <span
+                              className="w-2 h-2 rounded-full"
+                              style={{ background: g.color }}
+                            />
+                            <span>{g.name}</span>
+                            <span className="ml-auto text-[10px]" style={{ color: "var(--app-text-tertiary)" }}>
+                              {g.itemCount}
+                            </span>
+                          </span>
+                        ),
+                        onClick: () => toggleFavoriteInGroup(post.id, g.id),
+                      }))
+                }
+                placement="bottom-left"
+                menuClassName="min-w-[180px]"
+              />
             </div>
 
             {(post.osVersion || post.macModel) && (
@@ -219,10 +282,10 @@ function PostCard({ post, showPin = true }: { post: Post; showPin?: boolean }) {
 }
 
 export default function FeedPage() {
-  const { feedFilter, setFeedFilter, posts: storePosts } = useAppStore();
+  const { feedFilter, setFeedFilter, getFilteredPosts, getBlockedUserIds, posts, setActivePanel } = useAppStore();
 
   const filteredPosts = useMemo(() => {
-    let result = [...(storePosts.length > 0 ? storePosts : POSTS)];
+    let result = [...getFilteredPosts()];
 
     if (feedFilter.sort === "essence") {
       result = result.filter((p) => p.isEssence);
@@ -260,13 +323,16 @@ export default function FeedPage() {
     const pinned = result.filter((p) => p.isPinned);
     const others = result.filter((p) => !p.isPinned);
     return [...pinned, ...others];
-  }, [storePosts, feedFilter]);
+  }, [posts, feedFilter, getFilteredPosts]);
 
   const hasFilter =
     feedFilter.osVersion ||
     feedFilter.macModel ||
     feedFilter.tagId ||
     feedFilter.keyword;
+
+  const blockedCount = getBlockedUserIds().length;
+  const isBlockedEmpty = filteredPosts.length === 0 && !hasFilter && blockedCount > 0;
 
   const hotTags = TAGS.slice(0, 12);
 
@@ -419,6 +485,17 @@ export default function FeedPage() {
             filteredPosts.map((post) => <PostCard key={post.id} post={post} />)
           ) : hasFilter ? (
             <Empty type="search" />
+          ) : isBlockedEmpty ? (
+            <Empty
+              type="posts"
+              icon={Ban}
+              title="暂无可见帖子"
+              description={`你已屏蔽 ${blockedCount} 位用户，导致没有可显示的内容。可以在设置中管理屏蔽列表。`}
+              actionLabel="管理屏蔽设置"
+              onAction={() => {
+                setActivePanel("settings");
+              }}
+            />
           ) : (
             <>
               {Array.from({ length: 5 }).map((_, i) => (

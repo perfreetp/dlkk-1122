@@ -13,6 +13,7 @@ import type {
   FavoriteItem,
   Draft,
   BlockItem,
+  Reply,
 } from "@/types";
 import {
   CURRENT_USER,
@@ -23,6 +24,9 @@ import {
   FAVORITE_GROUPS,
   FAVORITE_ITEMS,
   DRAFTS,
+  CATEGORIES,
+  TAGS,
+  REPLIES,
 } from "@/mock";
 import { SHORTCUT_DEFS } from "@/types";
 
@@ -89,6 +93,22 @@ interface AppState {
   resetShortcuts: () => void;
   toggleShowUserMenu: () => void;
   getUnreadTotal: () => number;
+
+  createPost: (data: Partial<Post> & { title: string; content: string; categoryId: string; tagIds?: string[]; osVersion?: string; macModel?: string; images?: string[]; draftId?: string }) => string;
+  getPostById: (id: string) => Post | undefined;
+  getFilteredPosts: () => Post[];
+  toggleFavoriteInGroup: (postId: string, groupId: string) => void;
+  isPostFavorited: (postId: string) => boolean;
+  getPostFavoriteGroups: (postId: string) => string[];
+  unfavoritePost: (postId: string) => void;
+  getBlockedUserIds: () => string[];
+  getFilteredConversations: () => Conversation[];
+  getFilteredReplies: (replies: Reply[]) => Reply[];
+  getRepliesByPostId: (postId: string) => Reply[];
+  addReply: (postId: string, data: { content: string; replyToId?: string; replyToFloor?: number; replyToAuthor?: User; mentions?: string[]; images?: string[] }) => Reply;
+  addBlockKeyword: (keyword: string) => void;
+  removeBlockKeyword: (keyword: string) => void;
+  getBlockedKeywords: () => string[];
 }
 
 const defaultShortcuts: Record<string, string> = {};
@@ -372,6 +392,243 @@ export const useAppStore = create<AppState>()(
         const unreadNotif = s.notifications.filter((n) => !n.read).length;
         const unreadMsg = s.conversations.reduce((acc, c) => acc + c.unreadCount, 0);
         return unreadNotif + unreadMsg;
+      },
+
+      getBlockedUserIds: () => {
+        const s = get();
+        return s.preferences.blockedItems.filter((b) => b.type === "user").map((b) => b.targetId);
+      },
+
+      getBlockedKeywords: () => {
+        const s = get();
+        return s.preferences.blockedItems.filter((b) => b.type === "keyword").map((b) => b.targetName);
+      },
+
+      addBlockKeyword: (keyword) =>
+        set((s) => {
+          const existing = s.preferences.blockedItems.find(
+            (b) => b.type === "keyword" && b.targetName.toLowerCase() === keyword.toLowerCase()
+          );
+          if (existing) return {};
+          return {
+            preferences: {
+              ...s.preferences,
+              blockedItems: [
+                ...s.preferences.blockedItems,
+                {
+                  id: `b-${Date.now()}`,
+                  type: "keyword",
+                  targetId: keyword.toLowerCase(),
+                  targetName: keyword,
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            },
+          };
+        }),
+
+      removeBlockKeyword: (keyword) =>
+        set((s) => ({
+          preferences: {
+            ...s.preferences,
+            blockedItems: s.preferences.blockedItems.filter(
+              (b) => !(b.type === "keyword" && b.targetName.toLowerCase() === keyword.toLowerCase())
+            ),
+          },
+        })),
+
+      getFilteredPosts: () => {
+        const s = get();
+        const blockedIds = s.getBlockedUserIds();
+        const blockedKeywords = s.getBlockedKeywords();
+        return s.posts.filter((p) => {
+          if (blockedIds.includes(p.authorId)) return false;
+          if (blockedKeywords.length > 0) {
+            const titleLower = p.title.toLowerCase();
+            const contentLower = p.content.toLowerCase();
+            for (const kw of blockedKeywords) {
+              const kwLower = kw.toLowerCase();
+              if (titleLower.includes(kwLower) || contentLower.includes(kwLower)) {
+                return false;
+              }
+            }
+          }
+          return true;
+        });
+      },
+
+      getPostById: (id) => {
+        return get().posts.find((p) => p.id === id);
+      },
+
+      createPost: (data) => {
+        const s = get();
+        const category = CATEGORIES.find((c) => c.id === data.categoryId) || CATEGORIES[0];
+        const tags = (data.tagIds || []).map((tid) => TAGS.find((t) => t.id === tid)).filter(Boolean) as typeof TAGS;
+        const now = new Date().toISOString();
+        const newPost: Post = {
+          id: `p-${Date.now()}`,
+          title: data.title,
+          content: data.content,
+          authorId: s.currentUser.id,
+          author: s.currentUser,
+          categoryId: data.categoryId,
+          category,
+          tags,
+          isPinned: false,
+          isEssence: false,
+          viewCount: 0,
+          likeCount: 0,
+          replyCount: 0,
+          favoriteCount: 0,
+          osVersion: data.osVersion,
+          macModel: data.macModel,
+          images: data.images || [],
+          createdAt: now,
+          updatedAt: now,
+          isLiked: false,
+          isFavorited: false,
+        };
+        set((state) => {
+          const newState: Partial<AppState> = {
+            posts: [newPost, ...state.posts],
+          };
+          if (data.draftId) {
+            newState.drafts = state.drafts.filter((d) => d.id !== data.draftId);
+          }
+          return newState;
+        });
+        return newPost.id;
+      },
+
+      toggleFavoriteInGroup: (postId, groupId) => {
+        const state = get();
+        const post = state.posts.find((p) => p.id === postId);
+        if (!post) return;
+        const existing = state.favoriteItems.find((fi) => fi.targetId === postId && fi.groupId === groupId);
+        if (existing) {
+          set((s) => {
+            const newItems = s.favoriteItems.filter((fi) => fi.id !== existing.id);
+            const isFavorited = newItems.some((fi) => fi.targetId === postId);
+            const favCount = newItems.filter((fi) => fi.targetId === postId).length;
+            return {
+              favoriteItems: newItems,
+              favoriteGroups: s.favoriteGroups.map((g) =>
+                g.id === groupId ? { ...g, itemCount: Math.max(0, g.itemCount - 1) } : g
+              ),
+              posts: s.posts.map((p) =>
+                p.id === postId ? { ...p, isFavorited, favoriteCount: favCount } : p
+              ),
+            };
+          });
+        } else {
+          const newItem: FavoriteItem = {
+            id: `fi-${Date.now()}`,
+            groupId,
+            targetType: "post",
+            targetId: postId,
+            target: post,
+            addedAt: new Date().toISOString(),
+          };
+          set((s) => {
+            const newItems = [...s.favoriteItems, newItem];
+            const favCount = newItems.filter((fi) => fi.targetId === postId).length;
+            return {
+              favoriteItems: newItems,
+              favoriteGroups: s.favoriteGroups.map((g) => ({
+                ...g,
+                itemCount: newItems.filter((fi) => fi.groupId === g.id).length,
+              })),
+              posts: s.posts.map((p) =>
+                p.id === postId ? { ...p, isFavorited: true, favoriteCount: favCount } : p
+              ),
+            };
+          });
+        }
+      },
+
+      isPostFavorited: (postId) => {
+        return get().favoriteItems.some((fi) => fi.targetId === postId);
+      },
+
+      getPostFavoriteGroups: (postId) => {
+        return get()
+          .favoriteItems.filter((fi) => fi.targetId === postId)
+          .map((fi) => fi.groupId);
+      },
+
+      unfavoritePost: (postId) => {
+        set((s) => {
+          const itemsToRemove = s.favoriteItems.filter((fi) => fi.targetId === postId);
+          const groupIds = itemsToRemove.map((fi) => fi.groupId);
+          const newItems = s.favoriteItems.filter((fi) => fi.targetId !== postId);
+          return {
+            favoriteItems: newItems,
+            favoriteGroups: s.favoriteGroups.map((g) => {
+              if (groupIds.includes(g.id)) {
+                const count = newItems.filter((fi) => fi.groupId === g.id).length;
+                return { ...g, itemCount: count };
+              }
+              return g;
+            }),
+            posts: s.posts.map((p) =>
+              p.id === postId ? { ...p, isFavorited: false, favoriteCount: 0 } : p
+            ),
+          };
+        });
+      },
+
+      getFilteredConversations: () => {
+        const s = get();
+        const blockedIds = s.getBlockedUserIds();
+        return s.conversations.filter((c) => {
+          const otherUser = c.participants.find((p) => p.id !== s.currentUser.id);
+          return otherUser && !blockedIds.includes(otherUser.id);
+        });
+      },
+
+      getFilteredReplies: (replies) => {
+        const blockedIds = get().getBlockedUserIds();
+        return replies.filter((r) => !blockedIds.includes(r.authorId));
+      },
+
+      getRepliesByPostId: (postId) => {
+        return REPLIES[postId] || [];
+      },
+
+      addReply: (postId, data) => {
+        const s = get();
+        const postReplies = REPLIES[postId] || [];
+        const nextFloor = postReplies.length > 0 ? Math.max(...postReplies.map((r) => r.floor)) + 1 : 1;
+        const now = new Date().toISOString();
+        const newReply: Reply = {
+          id: `r-${Date.now()}`,
+          postId,
+          floor: nextFloor,
+          content: data.content,
+          authorId: s.currentUser.id,
+          author: s.currentUser,
+          replyToId: data.replyToId,
+          replyToFloor: data.replyToFloor,
+          replyToAuthor: data.replyToAuthor,
+          mentions: data.mentions || [],
+          likeCount: 0,
+          images: data.images || [],
+          createdAt: now,
+          isLiked: false,
+        };
+        if (!REPLIES[postId]) {
+          REPLIES[postId] = [];
+        }
+        REPLIES[postId].push(newReply);
+        set((state) => ({
+          posts: state.posts.map((p) =>
+            p.id === postId
+              ? { ...p, replyCount: p.replyCount + 1, lastReplyAt: now }
+              : p
+          ),
+        }));
+        return newReply;
       },
     }),
     {

@@ -36,6 +36,8 @@ export default function SearchOverlay() {
   const setActiveConversation = useAppStore((s) => s.setActiveConversation);
   const setProfileUserId = useAppStore((s) => s.setProfileUserId);
   const setActiveCategory = useAppStore((s) => s.setActiveCategory);
+  const setFeedFilter = useAppStore((s) => s.setFeedFilter);
+  const setActivePanel = useAppStore((s) => s.setActivePanel);
 
   const [keyword, setKeyword] = useState("");
   const [scope, setScope] = useState<SearchScope>("all");
@@ -170,6 +172,8 @@ export default function SearchOverlay() {
             </Tag>
           ),
           onClick: () => {
+            setFeedFilter({ tagId: t.id });
+            setActivePanel('feed');
             saveHistory(keyword.trim());
           },
         }))
@@ -192,9 +196,10 @@ export default function SearchOverlay() {
             description: c.lastMessage?.content,
             extra: null,
             onClick: () => {
-              setActiveConversation(c.id);
-              saveHistory(keyword.trim());
-            },
+            setActiveConversation(c.id);
+            setActivePanel('messages');
+            saveHistory(keyword.trim());
+          },
           };
         })
       );

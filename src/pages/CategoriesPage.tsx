@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useAppStore } from "@/stores/appStore";
-import { CATEGORIES, POSTS, USERS } from "@/mock";
+import { CATEGORIES, USERS } from "@/mock";
 import { PostCard } from "./FeedPage";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
@@ -115,7 +115,7 @@ function CategoryNavItem({
 }
 
 export default function CategoriesPage() {
-  const { activeCategoryId, setActiveCategory } = useAppStore();
+  const { activeCategoryId, setActiveCategory, getFilteredPosts, posts } = useAppStore();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(
     new Set(CATEGORIES.filter((c) => c.children && c.children.length > 0).map((c) => c.id))
   );
@@ -140,7 +140,7 @@ export default function CategoriesPage() {
   const categoryPosts = useMemo(() => {
     if (!activeCategory) return [];
     const childIds = activeCategory.children?.map((c) => c.id) || [];
-    return POSTS.filter(
+    return getFilteredPosts().filter(
       (p) =>
         p.categoryId === activeCategory.id ||
         childIds.includes(p.categoryId)
@@ -150,7 +150,7 @@ export default function CategoriesPage() {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
     });
-  }, [activeCategory]);
+  }, [activeCategory, posts, getFilteredPosts]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {

@@ -38,10 +38,20 @@ export default function MessagesPage() {
     sendMessage,
     markConversationRead,
     markAllNotificationsRead,
+    getFilteredConversations,
+    toggleBlockUser,
   } = useAppStore();
 
   const conversations = storeConversations.length > 0 ? storeConversations : MOCK_CONVERSATIONS;
   const messagesData = Object.keys(storeMessages).length > 0 ? storeMessages : MOCK_MESSAGES;
+
+  const filteredConversations = useMemo(() => {
+    const storeFiltered = getFilteredConversations();
+    return storeFiltered.length > 0 ? storeFiltered : conversations.filter((c) => {
+      const otherUser = c.participants.find((p) => p.id !== currentUser.id);
+      return otherUser && otherUser.id !== "u99";
+    });
+  }, [conversations, getFilteredConversations, currentUser.id]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [inputValue, setInputValue] = useState("");
@@ -51,7 +61,7 @@ export default function MessagesPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const sortedConversations = useMemo(() => {
-    const filtered = conversations.filter((c) => {
+    const filtered = filteredConversations.filter((c) => {
       if (!searchQuery) return true;
       const otherUser = c.participants.find((p) => p.id !== currentUser.id);
       return (
@@ -63,9 +73,9 @@ export default function MessagesPage() {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
     });
-  }, [conversations, searchQuery, currentUser.id]);
+  }, [filteredConversations, searchQuery, currentUser.id]);
 
-  const activeConversation = conversations.find((c) => c.id === activeConversationId);
+  const activeConversation = filteredConversations.find((c) => c.id === activeConversationId);
   const otherUser: User | undefined = activeConversation?.participants.find(
     (p) => p.id !== currentUser.id
   );
@@ -369,6 +379,11 @@ export default function MessagesPage() {
                       label: `屏蔽 ${otherUser.nickname}`,
                       icon: <UserMinus className="w-4 h-4" />,
                       danger: true,
+                      onClick: () => {
+                        if (confirm(`确定要屏蔽 ${otherUser.nickname} 吗？屏蔽后将不会再收到该用户的消息。`)) {
+                          toggleBlockUser(otherUser.id, otherUser.nickname);
+                        }
+                      },
                     },
                     {
                       key: "report",

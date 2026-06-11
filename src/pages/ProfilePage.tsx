@@ -59,6 +59,9 @@ export default function ProfilePage() {
     conversations,
     setActivePanel,
     toggleBlockUser,
+    getFilteredPosts,
+    getBlockedUserIds,
+    getRepliesByPostId,
   } = useAppStore();
 
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
@@ -73,10 +76,28 @@ export default function ProfilePage() {
   );
   const coverGradient = COVER_GRADIENTS[gradientIdx];
 
-  const userPosts = POSTS.filter((p) => p.authorId === user.id);
-  const userReplies = Object.values(REPLIES)
-    .flat()
-    .filter((r) => r.authorId === user.id);
+  const isBlocked = useMemo(() => {
+    return getBlockedUserIds().includes(user.id);
+  }, [user.id, getBlockedUserIds]);
+
+  const userPosts = useMemo(() => {
+    return getFilteredPosts()
+      .filter((p) => p.authorId === user.id)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [user.id, getFilteredPosts]);
+
+  const userReplies = useMemo(() => {
+    const allReplies: any[] = [];
+    const posts = getFilteredPosts();
+    posts.forEach((post) => {
+      const replies = getRepliesByPostId(post.id);
+      replies
+        .filter((r) => r.authorId === user.id)
+        .forEach((r) => allReplies.push({ ...r, postTitle: post.title }));
+    });
+    return allReplies.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [user.id, getFilteredPosts, getRepliesByPostId]);
+
   const userFavorites = isOwn ? FAVORITE_ITEMS : FAVORITE_ITEMS.slice(0, 3);
 
   const followingUsers = USERS.filter(
@@ -165,55 +186,56 @@ export default function ProfilePage() {
   const renderRepliesTab = () =>
     userReplies.length > 0 ? (
       <div className="space-y-3">
-        {userReplies.map((reply) => {
-          const parentPost = POSTS.find((p) => p.id === reply.postId);
-          return (
-            <div
-              key={reply.id}
-              onClick={() => parentPost && setActivePost(parentPost.id)}
-              className="rounded-xl p-4 transition-all cursor-pointer"
-              style={{
-                background: "var(--app-surface)",
-                border: "1px solid var(--app-border)",
-              }}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <ChevronRight
-                  className="w-4 h-4 flex-shrink-0"
-                  style={{ color: "var(--app-text-tertiary)" }}
-                />
-                <span
-                  className="text-sm font-medium truncate"
-                  style={{ color: "var(--app-text-primary)" }}
-                >
-                  回复了帖子:{" "}
-                  <span style={{ color: "var(--app-accent)" }}>
-                    {parentPost?.title || "(已删除)"}
-                  </span>
-                </span>
-              </div>
-              <div
-                className="mt-2 text-sm line-clamp-3 pl-6"
-                style={{ color: "var(--app-text-secondary)" }}
-              >
-                {reply.content}
-              </div>
-              <div
-                className="mt-3 flex items-center justify-between pl-6 text-xs"
+        {userReplies.map((reply: any) => (
+          <div
+            key={reply.id}
+            onClick={() => setActivePost(reply.postId)}
+            className="rounded-xl p-4 transition-all cursor-pointer hover:shadow-sm"
+            style={{
+              background: "var(--app-surface)",
+              border: "1px solid var(--app-border)",
+            }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <ChevronRight
+                className="w-4 h-4 flex-shrink-0"
                 style={{ color: "var(--app-text-tertiary)" }}
+              />
+              <span
+                className="text-sm font-medium truncate"
+                style={{ color: "var(--app-text-primary)" }}
               >
-                <span>{formatDate(reply.createdAt)}</span>
-                <span className="inline-flex items-center gap-1">
-                  <ThumbsUp className="w-3 h-3" />
-                  {reply.likeCount}
+                回复了帖子:{" "}
+                <span style={{ color: "var(--app-accent)" }}>
+                  {reply.postTitle || "(已删除)"}
                 </span>
-              </div>
+              </span>
             </div>
-          );
-        })}
+            <div
+              className="mt-2 text-sm line-clamp-3 pl-6"
+              style={{ color: "var(--app-text-secondary)" }}
+            >
+              {reply.content}
+            </div>
+            <div
+              className="mt-3 flex items-center justify-between pl-6 text-xs"
+              style={{ color: "var(--app-text-tertiary)" }}
+            >
+              <span>{formatDate(reply.createdAt)}</span>
+              <span className="inline-flex items-center gap-1">
+                <ThumbsUp className="w-3 h-3" />
+                {reply.likeCount}
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
     ) : (
-      <Empty type="posts" />
+      <Empty
+        type="posts"
+        title="还没有回复"
+        description={isOwn ? "快去回复帖子吧" : "TA 还没有回复过帖子"}
+      />
     );
 
   const renderFavoritesTab = () =>
@@ -420,6 +442,30 @@ export default function ProfilePage() {
             </Button>
           </div>
         </div>
+
+        {isBlocked && !isOwn && (
+          <div
+            className="px-5 py-3 flex items-center justify-between"
+            style={{
+              background: "color-mix(in srgb, var(--app-danger) 12%, transparent)",
+              borderBottom: "1px solid var(--app-border)",
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <Ban className="w-4 h-4" style={{ color: "var(--app-danger)" }} />
+              <span className="text-sm" style={{ color: "var(--app-text-primary)" }}>
+                该用户已被屏蔽
+              </span>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => toggleBlockUser(user.id, user.nickname)}
+            >
+              解除屏蔽
+            </Button>
+          </div>
+        )}
 
         <div className="max-w-5xl mx-auto px-5">
           <div className="relative -mt-16 mb-6">
