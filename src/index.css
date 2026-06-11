@@ -1,0 +1,332 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --app-bg: #F5F5F7;
+  --app-surface: #FFFFFF;
+  --app-surface-hover: #FAFAFC;
+  --app-surface-secondary: #F5F5F7;
+  --app-border: #E8E8ED;
+  --app-border-strong: #D2D2D7;
+  --app-text-primary: #1C1C1E;
+  --app-text-secondary: #636366;
+  --app-text-tertiary: #8E8E93;
+  --app-accent: #007AFF;
+  --app-accent-hover: #0062CC;
+  --app-danger: #FF3B30;
+  --app-success: #34C759;
+  --app-warning: #FF9500;
+  --app-sidebar-bg: rgba(245, 245, 247, 0.72);
+  --app-toolbar-bg: rgba(255, 255, 255, 0.72);
+  --app-code-bg: #F5F5F7;
+  --scrollbar-thumb: #C7C7CC;
+  --scrollbar-thumb-hover: #AEAEB2;
+}
+
+.dark {
+  --app-bg: #0F0F10;
+  --app-surface: #1C1C1E;
+  --app-surface-hover: #2C2C2E;
+  --app-surface-secondary: #2C2C2E;
+  --app-border: #3A3A3C;
+  --app-border-strong: #48484A;
+  --app-text-primary: #F5F5F7;
+  --app-text-secondary: #AEAEB2;
+  --app-text-tertiary: #636366;
+  --app-accent: #0A84FF;
+  --app-accent-hover: #409CFF;
+  --app-danger: #FF453A;
+  --app-success: #30D158;
+  --app-warning: #FF9F0A;
+  --app-sidebar-bg: rgba(28, 28, 30, 0.72);
+  --app-toolbar-bg: rgba(28, 28, 30, 0.82);
+  --app-code-bg: #2C2C2E;
+  --scrollbar-thumb: #48484A;
+  --scrollbar-thumb-hover: #636366;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--app-bg);
+  color: var(--app-text-primary);
+  transition: background-color 0.4s ease, color 0.3s ease;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+.vibrant-light {
+  background: var(--app-sidebar-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+.vibrant-toolbar {
+  background: var(--app-toolbar-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+@layer components {
+  .traffic-lights {
+    @apply flex items-center gap-2;
+  }
+  .traffic-light {
+    @apply w-3 h-3 rounded-full transition-opacity;
+  }
+  .traffic-close { @apply bg-mac-red; }
+  .traffic-min { @apply bg-mac-yellow; }
+  .traffic-max { @apply bg-mac-green; }
+
+  .mac-btn {
+    @apply px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+           inline-flex items-center justify-center gap-2
+           focus:outline-none focus:ring-2 focus:ring-offset-1;
+  }
+  .mac-btn-primary {
+    @apply mac-btn text-white shadow-sm
+           hover:shadow-md active:scale-[0.98];
+    background: linear-gradient(180deg, var(--app-accent) 0%, var(--app-accent-hover) 100%);
+  }
+  .mac-btn-secondary {
+    @apply mac-btn border;
+    background: var(--app-surface);
+    border-color: var(--app-border);
+    color: var(--app-text-primary);
+  }
+  .mac-btn-secondary:hover {
+    background: var(--app-surface-hover);
+    border-color: var(--app-border-strong);
+  }
+  .mac-btn-ghost {
+    @apply mac-btn hover:bg-black/5 dark:hover:bg-white/5;
+    color: var(--app-text-secondary);
+  }
+  .mac-btn-danger {
+    @apply mac-btn text-white hover:opacity-90;
+    background: var(--app-danger);
+  }
+  .mac-btn-icon {
+    @apply w-8 h-8 rounded-md flex items-center justify-center transition-all duration-150
+           hover:bg-black/5 dark:hover:bg-white/5 text-mac-gray-500 hover:text-mac-gray-800 dark:hover:text-white;
+  }
+
+  .mac-input {
+    @apply w-full px-3 py-2 rounded-lg text-sm outline-none transition-all duration-200
+           border focus:ring-2;
+    background: var(--app-surface);
+    border-color: var(--app-border);
+    color: var(--app-text-primary);
+  }
+  .mac-input:focus {
+    border-color: var(--app-accent);
+    --tw-ring-color: color-mix(in srgb, var(--app-accent) 30%, transparent);
+  }
+
+  .mac-select {
+    @apply mac-input appearance-none bg-no-repeat pr-8;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238E8E93' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 10px center;
+  }
+
+  .mac-card {
+    @apply rounded-xl p-5 transition-all duration-200;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+  }
+  .mac-card:hover {
+    border-color: var(--app-border-strong);
+    box-shadow: 0 4px 16px -4px rgba(0, 0, 0, 0.06);
+  }
+
+  .mac-tag {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .mac-avatar {
+    @apply rounded-full overflow-hidden flex-shrink-0 bg-mac-gray-100 dark:bg-mac-gray-700;
+  }
+
+  .mac-divider {
+    @apply my-4;
+    border-top: 1px solid var(--app-border);
+  }
+
+  .mac-tooltip {
+    @apply px-2 py-1 rounded-md text-xs whitespace-nowrap;
+    background: var(--app-text-primary);
+    color: var(--app-surface);
+  }
+
+  .mac-badge {
+    @apply min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-semibold
+           flex items-center justify-center text-white;
+    background: var(--app-danger);
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--app-surface-secondary) 0%,
+      var(--app-border) 50%,
+      var(--app-surface-secondary) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+}
+
+.markdown-body {
+  color: var(--app-text-primary);
+  line-height: 1.75;
+  font-size: 15px;
+}
+
+.markdown-body h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  margin: 1.5rem 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--app-border);
+}
+.markdown-body h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 1.25rem 0 0.75rem;
+}
+.markdown-body h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 1rem 0 0.5rem;
+}
+.markdown-body p {
+  margin: 0.75rem 0;
+}
+.markdown-body a {
+  color: var(--app-accent);
+  text-decoration: none;
+}
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+.markdown-body ul, .markdown-body ol {
+  margin: 0.75rem 0;
+  padding-left: 1.5rem;
+}
+.markdown-body li {
+  margin: 0.25rem 0;
+}
+.markdown-body blockquote {
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+  border-left: 4px solid var(--app-accent);
+  background: var(--app-surface-secondary);
+  border-radius: 0 8px 8px 0;
+  color: var(--app-text-secondary);
+}
+.markdown-body code {
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  background: var(--app-code-bg);
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+}
+.markdown-body pre {
+  margin: 1rem 0;
+  padding: 1rem;
+  border-radius: 10px;
+  overflow-x: auto;
+  background: var(--app-code-bg);
+  border: 1px solid var(--app-border);
+}
+.markdown-body pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.markdown-body table {
+  width: 100%;
+  margin: 1rem 0;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.markdown-body th, .markdown-body td {
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--app-border);
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--app-surface-secondary);
+  font-weight: 600;
+}
+.markdown-body tr:nth-child(even) td {
+  background: var(--app-surface-secondary);
+}
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 10px;
+  margin: 0.75rem 0;
+}
+.markdown-body hr {
+  margin: 1.5rem 0;
+  border: none;
+  border-top: 1px solid var(--app-border);
+}
+.markdown-body input[type="checkbox"] {
+  margin-right: 0.5rem;
+  accent-color: var(--app-accent);
+}
+.markdown-body strong {
+  font-weight: 600;
+}
+
+.app-transition {
+  transition: background-color 0.35s ease, border-color 0.35s ease, color 0.25s ease;
+}
+
+.fade-enter {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.fade-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.fade-exit {
+  opacity: 1;
+}
+.fade-exit-active {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
