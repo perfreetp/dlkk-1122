@@ -611,11 +611,11 @@ export const FAVORITE_GROUPS: FavoriteGroup[] = [
 ];
 
 export const FAVORITE_ITEMS: FavoriteItem[] = [
-  { id: "fi1", groupId: "fg2", targetType: "post", targetId: "p5", target: POSTS[4], addedAt: days(2) },
-  { id: "fi2", groupId: "fg3", targetType: "post", targetId: "p6", target: POSTS[5], addedAt: days(1) },
+  { id: "fi1", groupId: "fg2", targetType: "post", targetId: "p5", target: POSTS[4], addedAt: days(2), starred: true, statusUpdatedAt: days(1) },
+  { id: "fi2", groupId: "fg3", targetType: "post", targetId: "p6", target: POSTS[5], addedAt: days(1), readLater: true, statusUpdatedAt: hours(12) },
   { id: "fi3", groupId: "fg1", targetType: "post", targetId: "p12", target: POSTS[11], addedAt: hours(12) },
-  { id: "fi4", groupId: "fg4", targetType: "post", targetId: "p14", target: POSTS[13], addedAt: hours(8) },
-  { id: "fi5", groupId: "fg5", targetType: "post", targetId: "p12", target: POSTS[11], addedAt: hours(6) },
+  { id: "fi4", groupId: "fg4", targetType: "post", targetId: "p14", target: POSTS[13], addedAt: hours(8), starred: true, readLater: true, statusUpdatedAt: hours(6) },
+  { id: "fi5", groupId: "fg5", targetType: "post", targetId: "p12", target: POSTS[11], addedAt: hours(6), archived: true, statusUpdatedAt: hours(2) },
   { id: "fi6", groupId: "fg3", targetType: "post", targetId: "p10", target: POSTS[9], addedAt: days(4) },
 ];
 

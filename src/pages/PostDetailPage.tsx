@@ -814,16 +814,11 @@ export default function PostDetailPage() {
     if (!post || !remarkTargetGroup) return;
 
     if (remarkMode === "add") {
-      toggleFavoriteInGroup(post.id, remarkTargetGroup.id);
-
-      setTimeout(() => {
-        const favItem = favoriteItems.find(
-          (fi) => fi.targetId === post!.id && fi.groupId === remarkTargetGroup!.id
-        );
-        if (favItem && remarkValue.trim()) {
-          setFavoriteItemRemark(favItem.id, remarkValue.trim());
-        }
-      }, 0);
+      toggleFavoriteInGroup(
+        post.id,
+        remarkTargetGroup.id,
+        remarkValue.trim() || undefined
+      );
     } else {
       const favItem = getPostFavoriteItems(post.id).find(
         (fi) => fi.groupId === remarkTargetGroup.id
@@ -1666,7 +1661,7 @@ export default function PostDetailPage() {
             }}>
               取消
             </Button>
-            <Button variant="primary" onClick={handleSaveRemark} disabled={remarkMode === 'add' && !remarkValue.trim()}>
+            <Button variant="primary" onClick={handleSaveRemark}>
               {remarkMode === 'add' ? '收藏' : '保存备注'}
             </Button>
           </>
@@ -1675,7 +1670,7 @@ export default function PostDetailPage() {
         <textarea
           className="mac-input resize-none"
           rows={4}
-          placeholder="添加备注，方便后续搜索和整理..."
+          placeholder="可选：添加备注，方便后续搜索和整理"
           value={remarkValue}
           onChange={(e) => setRemarkValue(e.target.value)}
           autoFocus

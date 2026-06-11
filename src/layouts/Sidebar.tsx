@@ -8,7 +8,7 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/types";
 
-type PanelType = "feed" | "categories" | "messages" | "favorites" | "profile";
+type PanelType = "feed" | "categories" | "messages" | "favorites" | "drafts" | "profile";
 
 interface NavItem {
   key: PanelType;
@@ -19,8 +19,9 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { key: "feed", label: "推荐", icon: LucideIcons.Flame },
   { key: "categories", label: "分区", icon: LucideIcons.Layers },
-  { key: "messages", label: "消息", icon: LucideIcons.MessageSquare },
   { key: "favorites", label: "收藏", icon: LucideIcons.Heart },
+  { key: "drafts", label: "草稿箱", icon: LucideIcons.FileEdit },
+  { key: "messages", label: "消息", icon: LucideIcons.MessageSquare },
   { key: "profile", label: "个人", icon: LucideIcons.User },
 ];
 
@@ -125,6 +126,7 @@ export default function Sidebar() {
     setActiveCategory,
     activeCategoryId,
     setActiveSettingsTab,
+    drafts,
   } = useAppStore();
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(
@@ -144,6 +146,8 @@ export default function Sidebar() {
         return unreadMsg;
       case "favorites":
         return 0;
+      case "drafts":
+        return drafts.length;
       default:
         return unreadNotif;
     }

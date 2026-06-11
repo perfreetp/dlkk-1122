@@ -131,6 +131,10 @@ export interface FavoriteItem {
   target?: Post | Reply;
   remark?: string;
   addedAt: string;
+  starred?: boolean;
+  readLater?: boolean;
+  archived?: boolean;
+  statusUpdatedAt?: string;
 }
 
 export type NotificationType = "reply" | "mention" | "like" | "system" | "message";

@@ -27,11 +27,13 @@ import {
   ChevronRight,
   ThumbsUp,
   Apple,
+  Clock,
+  Trash2,
 } from "lucide-react";
 import { formatNumber, formatDate, getOSVersionLabel, getMacModelLabel } from "@/lib/utils";
 import type { TabItem } from "@/components/ui/Tabs";
 import type { Post, Reply, FavoriteItem, FavoriteGroup } from "@/types";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ComponentType } from "react";
 
 const COVER_GRADIENTS = [
   "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -41,10 +43,34 @@ const COVER_GRADIENTS = [
   "linear-gradient(135deg, #fa709a 0%, #fee140 100%)",
 ];
 
+type TimelineActivityType =
+  | "post_publish"
+  | "post_edit"
+  | "reply_publish"
+  | "reply_edit"
+  | "reply_delete"
+  | "favorite_add";
+
+interface TimelineItem {
+  id: string;
+  type: TimelineActivityType;
+  timestamp: string;
+  postId: string;
+  postTitle: string;
+  content?: string;
+  replyId?: string;
+  groupId?: string;
+  groupName?: string;
+  groupColor?: string;
+  isDeleted?: boolean;
+  isEdited?: boolean;
+}
+
 const TAB_DEFS: TabItem[] = [
   { key: "posts", label: "发帖", icon: <FileText className="w-4 h-4" /> },
   { key: "replies", label: "回复", icon: <MessageSquare className="w-4 h-4" /> },
   { key: "favorites", label: "收藏", icon: <Heart className="w-4 h-4" /> },
+  { key: "timeline", label: "时间线", icon: <Clock className="w-4 h-4" /> },
   { key: "following", label: "关注", icon: <UserPlus className="w-4 h-4" /> },
   { key: "followers", label: "粉丝", icon: <Users className="w-4 h-4" /> },
 ];
@@ -67,6 +93,7 @@ export default function ProfilePage() {
     favoriteItems,
     favoriteGroups,
     getPostById,
+    setActiveFavoriteGroup,
   } = useAppStore();
 
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
@@ -92,16 +119,87 @@ export default function ProfilePage() {
   }, [user.id, getFilteredPosts]);
 
   const userReplies = useMemo(() => {
-    const allReplies: (Reply & { postTitle: string })[] = [];
+    const allReplies: (Reply & { postId: string; postTitle: string })[] = [];
     const posts = getFilteredPosts();
     posts.forEach((post) => {
       const replies = getRepliesByPostId(post.id);
       replies
         .filter((r) => r.authorId === user.id)
-        .forEach((r) => allReplies.push({ ...r, postTitle: post.title }));
+        .forEach((r) => allReplies.push({ ...r, postId: post.id, postTitle: post.title }));
     });
     return allReplies.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [user.id, getFilteredPosts, getRepliesByPostId]);
+
+  const timelineItems = useMemo(() => {
+    const items: TimelineItem[] = [];
+
+    userPosts.forEach((post) => {
+      items.push({
+        id: `post-${post.id}`,
+        type: "post_publish",
+        timestamp: post.createdAt,
+        postId: post.id,
+        postTitle: post.title,
+        content: post.content.slice(0, 100),
+      });
+    });
+
+    userReplies.forEach((reply) => {
+      if (reply.isDeleted) {
+        items.push({
+          id: `reply-del-${reply.id}`,
+          type: "reply_delete",
+          timestamp: reply.deletedAt || reply.createdAt,
+          postId: reply.postId,
+          postTitle: reply.postTitle,
+          replyId: reply.id,
+          isDeleted: true,
+        });
+      } else {
+        items.push({
+          id: `reply-${reply.id}`,
+          type: "reply_publish",
+          timestamp: reply.createdAt,
+          postId: reply.postId,
+          postTitle: reply.postTitle,
+          replyId: reply.id,
+          content: reply.content.slice(0, 100),
+        });
+
+        if (reply.isEdited) {
+          items.push({
+            id: `reply-edit-${reply.id}`,
+            type: "reply_edit",
+            timestamp: reply.editedAt || reply.createdAt,
+            postId: reply.postId,
+            postTitle: reply.postTitle,
+            replyId: reply.id,
+            isEdited: true,
+          });
+        }
+      }
+    });
+
+    favoriteItems.forEach((fav) => {
+      if (fav.targetType !== "post") return;
+      const post = getPostById(fav.targetId);
+      const group = favoriteGroups.find((g) => g.id === fav.groupId);
+      if (post) {
+        items.push({
+          id: `fav-${fav.id}`,
+          type: "favorite_add",
+          timestamp: fav.addedAt,
+          postId: post.id,
+          postTitle: post.title,
+          groupId: fav.groupId,
+          groupName: group?.name,
+          groupColor: group?.color,
+        });
+      }
+    });
+
+    return items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [userPosts, userReplies, favoriteItems, getPostById, favoriteGroups]);
 
   const userFavorites = useMemo(() => {
     type FavoriteWithPost = FavoriteItem & { post?: Post; group?: FavoriteGroup };
@@ -151,7 +249,7 @@ export default function ProfilePage() {
   }: {
     label: string;
     value: number | string;
-    icon: any;
+    icon: ComponentType<{ className?: string }>;
     color: string;
   }) => (
     <div
@@ -438,6 +536,125 @@ export default function ProfilePage() {
       <Empty type="users" />
     );
 
+  const getActivityConfig = (type: TimelineActivityType) => {
+    const configs: Record<TimelineActivityType, { icon: ComponentType<{ className?: string }>; label: string; color: string }> = {
+      post_publish: { icon: FileText, label: "发布了帖子", color: "var(--app-accent)" },
+      post_edit: { icon: Pencil, label: "编辑了帖子", color: "#FF9500" },
+      reply_publish: { icon: MessageSquare, label: "回复了帖子", color: "#34C759" },
+      reply_edit: { icon: Pencil, label: "编辑了回复", color: "#FF9500" },
+      reply_delete: { icon: Trash2, label: "撤回了回复", color: "#FF3B30" },
+      favorite_add: { icon: Heart, label: "收藏了帖子", color: "#FF2D55" },
+    };
+    return configs[type];
+  };
+
+  const renderTimelineTab = () =>
+    timelineItems.length > 0 ? (
+      <div className="relative">
+        <div
+          className="absolute left-5 top-2 bottom-2 w-0.5"
+          style={{ background: "var(--app-border)" }}
+        />
+        <div className="space-y-4">
+          {timelineItems.map((item) => {
+            const config = getActivityConfig(item.type);
+            const Icon = config.icon;
+            return (
+              <div key={item.id} className="relative flex gap-4">
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 z-10 border-4"
+                  style={{
+                    background: `${config.color}15`,
+                    color: config.color,
+                    borderColor: "var(--app-bg)",
+                  }}
+                >
+                  <Icon className="w-4 h-4" />
+                </div>
+                <div
+                  className={`flex-1 rounded-xl p-4 transition-all ${item.isDeleted ? "opacity-60" : ""}`}
+                  style={{
+                    background: "var(--app-surface)",
+                    border: "1px solid var(--app-border)",
+                  }}
+                >
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <span className="text-sm font-medium" style={{ color: config.color }}>
+                      {config.label}
+                    </span>
+                    {item.isEdited && (
+                      <Badge variant="gray" size="sm">
+                        已编辑
+                      </Badge>
+                    )}
+                    {item.isDeleted && (
+                      <Badge variant="gray" size="sm">
+                        已撤回
+                      </Badge>
+                    )}
+                    <span
+                      className="text-xs ml-auto"
+                      style={{ color: "var(--app-text-tertiary)" }}
+                    >
+                      {formatDate(item.timestamp)}
+                    </span>
+                  </div>
+
+                  <div
+                    className={`text-sm font-semibold mb-2 cursor-pointer hover:underline ${item.isDeleted ? "line-through" : ""}`}
+                    style={{ color: "var(--app-text-primary)" }}
+                    onClick={() => setActivePost(item.postId)}
+                  >
+                    {item.postTitle || "(已删除)"}
+                  </div>
+
+                  {item.type === "favorite_add" && item.groupName && (
+                    <div className="mb-2">
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs cursor-pointer hover:opacity-80"
+                        style={{
+                          background: `${item.groupColor || "#007AFF"}15`,
+                          color: item.groupColor || "#007AFF",
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (item.groupId) {
+                            setActiveFavoriteGroup(item.groupId);
+                            setActivePanel("favorites");
+                          }
+                        }}
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{ background: item.groupColor || "#007AFF" }}
+                        />
+                        收藏至 {item.groupName}
+                      </span>
+                    </div>
+                  )}
+
+                  {item.content && !item.isDeleted && (
+                    <div
+                      className="text-sm line-clamp-2"
+                      style={{ color: "var(--app-text-secondary)" }}
+                    >
+                      {item.content}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    ) : (
+      <Empty
+        type="posts"
+        title="还没有活动记录"
+        description={isOwn ? "快去发帖、回复或收藏吧" : "TA 还没有活动记录"}
+      />
+    );
+
   const renderTabContent = () => {
     switch (activeProfileTab) {
       case "posts":
@@ -446,6 +663,8 @@ export default function ProfilePage() {
         return renderRepliesTab();
       case "favorites":
         return renderFavoritesTab();
+      case "timeline":
+        return renderTimelineTab();
       case "following":
         return renderFollowingTab();
       case "followers":

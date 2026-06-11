@@ -37,6 +37,8 @@ import {
   List,
   User,
   Tag,
+  Star,
+  Archive,
 } from "lucide-react";
 import { cn, formatTime, formatNumber, formatDate } from "@/lib/utils";
 import type { Post, Reply } from "@/types";
@@ -72,6 +74,7 @@ const ORGANIZE_TABS: TabItem[] = [
 
 type ViewMode = "grid" | "organize";
 type OrganizeBy = "author" | "tag" | "color";
+type StatusFilter = "all" | "starred" | "readLater" | "archived";
 
 export default function FavoritesPage() {
   const {
@@ -91,6 +94,7 @@ export default function FavoritesPage() {
     updateFavoriteGroup,
     setFavoriteItemRemark,
     getPostById,
+    setFavoriteItemStatus,
   } = useAppStore();
 
   const groups = storeGroups.length > 0 ? storeGroups : MOCK_GROUPS;
@@ -118,6 +122,7 @@ export default function FavoritesPage() {
   const [remarkText, setRemarkText] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [organizeBy, setOrganizeBy] = useState<OrganizeBy>("author");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const activeGroup = groups.find((g) => g.id === activeFavoriteGroupId);
 
@@ -146,6 +151,16 @@ export default function FavoritesPage() {
       activeFavoriteGroupId === "fg1"
         ? items
         : items.filter((i) => i.groupId === activeFavoriteGroupId);
+
+    if (statusFilter === "starred") {
+      result = result.filter((i) => i.starred);
+    } else if (statusFilter === "readLater") {
+      result = result.filter((i) => i.readLater);
+    } else if (statusFilter === "archived") {
+      result = result.filter((i) => i.archived);
+    } else if (statusFilter === "all") {
+      result = result.filter((i) => !i.archived);
+    }
 
     if (searchQuery) {
       const kw = searchQuery.toLowerCase();
@@ -189,7 +204,7 @@ export default function FavoritesPage() {
       ...item,
       hitTypes: getHitTypes(item, searchQuery),
     }));
-  }, [items, activeFavoriteGroupId, searchQuery, sortBy]);
+  }, [items, activeFavoriteGroupId, searchQuery, sortBy, statusFilter]);
 
   const organizedData = useMemo(() => {
     type ItemWithPost = (typeof activeGroupItems)[number] & {
@@ -651,6 +666,68 @@ export default function FavoritesPage() {
               <div className="flex items-center rounded-full overflow-hidden border" style={{ borderColor: "var(--app-border)" }}>
                 <button
                   type="button"
+                  onClick={() => setStatusFilter("all")}
+                  className={cn(
+                    "px-3 py-1.5 text-xs flex items-center gap-1.5 transition-all",
+                    statusFilter === "all" ? "font-medium" : "hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                  style={{
+                    background: statusFilter === "all" ? "var(--app-accent)" : "transparent",
+                    color: statusFilter === "all" ? "#fff" : "var(--app-text-secondary)",
+                  }}
+                >
+                  全部
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter("starred")}
+                  className={cn(
+                    "px-3 py-1.5 text-xs flex items-center gap-1.5 transition-all",
+                    statusFilter === "starred" ? "font-medium" : "hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                  style={{
+                    background: statusFilter === "starred" ? "var(--app-accent)" : "transparent",
+                    color: statusFilter === "starred" ? "#fff" : "var(--app-text-secondary)",
+                  }}
+                >
+                  <Star className="w-3.5 h-3.5" />
+                  星标
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter("readLater")}
+                  className={cn(
+                    "px-3 py-1.5 text-xs flex items-center gap-1.5 transition-all",
+                    statusFilter === "readLater" ? "font-medium" : "hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                  style={{
+                    background: statusFilter === "readLater" ? "var(--app-accent)" : "transparent",
+                    color: statusFilter === "readLater" ? "#fff" : "var(--app-text-secondary)",
+                  }}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  稍后读
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter("archived")}
+                  className={cn(
+                    "px-3 py-1.5 text-xs flex items-center gap-1.5 transition-all",
+                    statusFilter === "archived" ? "font-medium" : "hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                  style={{
+                    background: statusFilter === "archived" ? "var(--app-accent)" : "transparent",
+                    color: statusFilter === "archived" ? "#fff" : "var(--app-text-secondary)",
+                  }}
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                  归档
+                </button>
+              </div>
+
+              <div className="flex items-center rounded-full overflow-hidden border" style={{ borderColor: "var(--app-border)" }}>
+                <button
+                  type="button"
                   onClick={() => setViewMode("grid")}
                   className={cn(
                     "px-3 py-1.5 text-xs flex items-center gap-1.5 transition-all",
@@ -830,12 +907,54 @@ export default function FavoritesPage() {
                         <div
                           key={item.id}
                           onClick={() => item.post && setActivePost(item.post.id)}
-                          className="flex-shrink-0 w-56 rounded-xl p-3 cursor-pointer transition-all hover:shadow-md"
+                          className={cn(
+                            "flex-shrink-0 w-56 rounded-xl p-3 cursor-pointer transition-all hover:shadow-md relative group",
+                            item.archived && "opacity-60"
+                          )}
                           style={{
                             background: "var(--app-surface)",
                             border: "1px solid var(--app-border)",
                           }}
                         >
+                          <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFavoriteItemStatus(item.id, { starred: !item.starred });
+                              }}
+                              className="w-5 h-5 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                              style={{ color: item.starred ? "var(--app-accent)" : "var(--app-text-tertiary)" }}
+                              title={item.starred ? "取消星标" : "添加星标"}
+                            >
+                              <Star className={cn("w-3 h-3", item.starred && "fill-current")} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFavoriteItemStatus(item.id, { readLater: !item.readLater });
+                              }}
+                              className="w-5 h-5 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                              style={{ color: item.readLater ? "var(--app-accent)" : "var(--app-text-tertiary)" }}
+                              title={item.readLater ? "取消稍后阅读" : "添加稍后阅读"}
+                            >
+                              <Clock className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFavoriteItemStatus(item.id, { archived: !item.archived });
+                              }}
+                              className="w-5 h-5 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                              style={{ color: item.archived ? "var(--app-accent)" : "var(--app-text-tertiary)" }}
+                              title={item.archived ? "取消归档" : "归档"}
+                            >
+                              <Archive className="w-3 h-3" />
+                            </button>
+                          </div>
+
                           {item.hitTypes?.length > 0 && (
                             <div className="flex items-center gap-1 mb-2 flex-wrap">
                               {item.hitTypes.map((type) => (
@@ -853,11 +972,22 @@ export default function FavoritesPage() {
                             </div>
                           )}
                           <h4
-                            className="text-xs font-semibold line-clamp-2 mb-2"
+                            className="text-xs font-semibold line-clamp-2 mb-2 pr-16"
                             style={{ color: "var(--app-text-primary)" }}
                           >
+                            <span className="mr-0.5">
+                              {item.starred && <span title="星标">⭐</span>}
+                              {item.readLater && <span title="稍后阅读">🕐</span>}
+                            </span>
                             {item.post?.title || "(无标题)"}
                           </h4>
+                          {item.archived && (
+                            <div className="mb-2">
+                              <Badge variant="gray" size="sm">
+                                已归档
+                              </Badge>
+                            </div>
+                          )}
                           {item.remark && (
                             <p
                               className="text-[10px] italic line-clamp-1 mb-2"
@@ -910,6 +1040,7 @@ export default function FavoritesPage() {
                     className={cn(
                       "rounded-xl p-4 transition-all relative group cursor-pointer",
                       draggedItem === item.id && "opacity-50 scale-95",
+                      item.archived && "opacity-60",
                       "hover:shadow-md"
                     )}
                     style={{
@@ -990,78 +1121,126 @@ export default function FavoritesPage() {
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2 mb-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {targetGroup && (
-                              <span
-                                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full"
-                                style={{
-                                  background: `${targetGroup.color}15`,
-                                  color: targetGroup.color,
-                                }}
-                              >
-                                <span className="w-1.5 h-1.5 rounded-full" style={{ background: targetGroup.color }} />
-                                {targetGroup.name}
-                              </span>
-                            )}
-                            {item.targetType === "reply" && (
-                              <Badge variant="success" size="sm">
-                                回复
-                              </Badge>
-                            )}
-                          </div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {targetGroup && (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full"
+                                  style={{
+                                    background: `${targetGroup.color}15`,
+                                    color: targetGroup.color,
+                                  }}
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: targetGroup.color }} />
+                                  {targetGroup.name}
+                                </span>
+                              )}
+                              {item.targetType === "reply" && (
+                                <Badge variant="success" size="sm">
+                                  回复
+                                </Badge>
+                              )}
+                              {item.archived && (
+                                <Badge variant="gray" size="sm">
+                                  已归档
+                                </Badge>
+                              )}
+                            </div>
 
-                          <Dropdown
-                            trigger={
+                            <div className="flex items-center gap-0.5">
                               <button
                                 type="button"
-                                onClick={(e) => e.stopPropagation()}
-                                className="w-7 h-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/5 dark:hover:bg-white/5"
-                                style={{ color: "var(--app-text-secondary)" }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setFavoriteItemStatus(item.id, { starred: !item.starred });
+                                }}
+                                className="w-7 h-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-black/5 dark:hover:bg-white/5"
+                                style={{ color: item.starred ? "var(--app-accent)" : "var(--app-text-tertiary)" }}
+                                title={item.starred ? "取消星标" : "添加星标"}
                               >
-                                <MoreHorizontal className="w-4 h-4" />
+                                <Star className={cn("w-4 h-4", item.starred && "fill-current")} />
                               </button>
-                            }
-                            items={[
-                              {
-                                key: "remark",
-                                label: "编辑备注",
-                                icon: <MessageSquare className="w-4 h-4" />,
-                                onClick: () => {
-                                  handleOpenRemarkModal(item.id, item.remark);
-                                },
-                              },
-                              {
-                                key: "move",
-                                label: "移动到分组",
-                                icon: <Move className="w-4 h-4" />,
-                                onClick: () => {
-                                  setMovingItemIds([item.id]);
-                                  setShowMoveModal(true);
-                                },
-                              },
-                              {
-                                key: "open",
-                                label: "打开原帖",
-                                icon: <ExternalLink className="w-4 h-4" />,
-                                onClick: () => post && setActivePost(post.id),
-                              },
-                              { key: "divider1", label: "", divider: true },
-                              {
-                                key: "remove",
-                                label: "移除收藏",
-                                icon: <Trash2 className="w-4 h-4" />,
-                                danger: true,
-                                onClick: () => removeFavoriteItem(item.id),
-                              },
-                            ] as DropdownItem[]}
-                            placement="bottom-right"
-                          />
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setFavoriteItemStatus(item.id, { readLater: !item.readLater });
+                                }}
+                                className="w-7 h-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-black/5 dark:hover:bg-white/5"
+                                style={{ color: item.readLater ? "var(--app-accent)" : "var(--app-text-tertiary)" }}
+                                title={item.readLater ? "取消稍后阅读" : "添加稍后阅读"}
+                              >
+                                <Clock className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setFavoriteItemStatus(item.id, { archived: !item.archived });
+                                }}
+                                className="w-7 h-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-black/5 dark:hover:bg-white/5"
+                                style={{ color: item.archived ? "var(--app-accent)" : "var(--app-text-tertiary)" }}
+                                title={item.archived ? "取消归档" : "归档"}
+                              >
+                                <Archive className="w-4 h-4" />
+                              </button>
+
+                              <Dropdown
+                                trigger={
+                                  <button
+                                    type="button"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-7 h-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/5 dark:hover:bg-white/5"
+                                    style={{ color: "var(--app-text-secondary)" }}
+                                  >
+                                    <MoreHorizontal className="w-4 h-4" />
+                                  </button>
+                                }
+                                items={[
+                                  {
+                                    key: "remark",
+                                    label: "编辑备注",
+                                    icon: <MessageSquare className="w-4 h-4" />,
+                                    onClick: () => {
+                                      handleOpenRemarkModal(item.id, item.remark);
+                                    },
+                                  },
+                                  {
+                                    key: "move",
+                                    label: "移动到分组",
+                                    icon: <Move className="w-4 h-4" />,
+                                    onClick: () => {
+                                      setMovingItemIds([item.id]);
+                                      setShowMoveModal(true);
+                                    },
+                                  },
+                                  {
+                                    key: "open",
+                                    label: "打开原帖",
+                                    icon: <ExternalLink className="w-4 h-4" />,
+                                    onClick: () => post && setActivePost(post.id),
+                                  },
+                                  { key: "divider1", label: "", divider: true },
+                                  {
+                                    key: "remove",
+                                    label: "移除收藏",
+                                    icon: <Trash2 className="w-4 h-4" />,
+                                    danger: true,
+                                    onClick: () => removeFavoriteItem(item.id),
+                                  },
+                                ] as DropdownItem[]}
+                                placement="bottom-right"
+                              />
+                            </div>
                         </div>
 
                         <h3
                           className="text-sm font-semibold line-clamp-2 mb-1.5"
                           style={{ color: "var(--app-text-primary)" }}
                         >
+                          <span className="mr-1">
+                            {item.starred && <span title="星标">⭐</span>}
+                            {item.readLater && <span title="稍后阅读">🕐</span>}
+                          </span>
                           {reply
                             ? `回复: ${(REPLIES[reply.postId]?.[0]?.content || "").slice(0, 30)}...`
                             : post?.title || "(无标题)"}

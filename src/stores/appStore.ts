@@ -44,7 +44,7 @@ interface AppState {
   activeFavoriteGroupId: string;
   drafts: Draft[];
   storeReplies: Record<string, Reply[]>;
-  activePanel: "feed" | "categories" | "post" | "messages" | "favorites" | "profile" | "settings" | "editor";
+  activePanel: "feed" | "categories" | "post" | "messages" | "favorites" | "profile" | "settings" | "editor" | "drafts";
   activePostId?: string;
   showEditor: boolean;
   editorDraftId?: string;
@@ -98,7 +98,7 @@ interface AppState {
   createPost: (data: Partial<Post> & { title: string; content: string; categoryId: string; tagIds?: string[]; osVersion?: string; macModel?: string; images?: string[]; draftId?: string }) => string;
   getPostById: (id: string) => Post | undefined;
   getFilteredPosts: () => Post[];
-  toggleFavoriteInGroup: (postId: string, groupId: string) => void;
+  toggleFavoriteInGroup: (postId: string, groupId: string, remark?: string) => string | undefined;
   isPostFavorited: (postId: string) => boolean;
   getPostFavoriteGroups: (postId: string) => string[];
   unfavoritePost: (postId: string) => void;
@@ -115,6 +115,8 @@ interface AppState {
   setFavoriteItemRemark: (itemId: string, remark: string) => void;
   reorderFavoriteGroups: (orderedIds: string[]) => void;
   updateFavoriteGroup: (id: string, data: { name?: string; color?: string; description?: string }) => void;
+  setFavoriteItemStatus: (itemId: string, status: Partial<Pick<FavoriteItem, 'starred' | 'readLater' | 'archived'>>) => void;
+  getFavoriteItemsByStatus: (status: { starred?: boolean; readLater?: boolean; archived?: boolean }) => FavoriteItem[];
 }
 
 const defaultShortcuts: Record<string, string> = {};
@@ -536,10 +538,10 @@ export const useAppStore = create<AppState>()(
         return newPost.id;
       },
 
-      toggleFavoriteInGroup: (postId, groupId) => {
+      toggleFavoriteInGroup: (postId, groupId, remark) => {
         const state = get();
         const post = state.posts.find((p) => p.id === postId);
-        if (!post) return;
+        if (!post) return undefined;
         const existing = state.favoriteItems.find((fi) => fi.targetId === postId && fi.groupId === groupId);
         if (existing) {
           set((s) => {
@@ -556,6 +558,7 @@ export const useAppStore = create<AppState>()(
               ),
             };
           });
+          return undefined;
         } else {
           const newItem: FavoriteItem = {
             id: `fi-${Date.now()}`,
@@ -563,6 +566,7 @@ export const useAppStore = create<AppState>()(
             targetType: "post",
             targetId: postId,
             target: post,
+            remark: remark || undefined,
             addedAt: new Date().toISOString(),
           };
           set((s) => {
@@ -579,6 +583,7 @@ export const useAppStore = create<AppState>()(
               ),
             };
           });
+          return newItem.id;
         }
       },
 
@@ -731,6 +736,25 @@ export const useAppStore = create<AppState>()(
             g.id === id ? { ...g, ...data } : g
           ),
         })),
+
+      setFavoriteItemStatus: (itemId, status) =>
+        set((s) => ({
+          favoriteItems: s.favoriteItems.map((fi) =>
+            fi.id === itemId
+              ? { ...fi, ...status, statusUpdatedAt: new Date().toISOString() }
+              : fi
+          ),
+        })),
+
+      getFavoriteItemsByStatus: (status) => {
+        const s = get();
+        return s.favoriteItems.filter((fi) => {
+          if (status.starred !== undefined && fi.starred !== status.starred) return false;
+          if (status.readLater !== undefined && fi.readLater !== status.readLater) return false;
+          if (status.archived !== undefined && fi.archived !== status.archived) return false;
+          return true;
+        });
+      },
     }),
     {
       name: "mac-forum-store",

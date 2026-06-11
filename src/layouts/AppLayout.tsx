@@ -7,6 +7,7 @@ import PostDetailPage from "@/pages/PostDetailPage";
 import EditorPage from "@/pages/EditorPage";
 import MessagesPage from "@/pages/MessagesPage";
 import FavoritesPage from "@/pages/FavoritesPage";
+import DraftsPage from "@/pages/DraftsPage";
 import ProfilePage from "@/pages/ProfilePage";
 import SettingsPage from "@/pages/SettingsPage";
 import NotificationPanel from "@/components/NotificationPanel";
@@ -45,6 +46,8 @@ export default function AppLayout() {
         return <MessagesPage />;
       case "favorites":
         return <FavoritesPage />;
+      case "drafts":
+        return <DraftsPage />;
       case "profile":
         return <ProfilePage />;
       case "settings":
