@@ -43,7 +43,9 @@ import {
   Pencil,
 } from "lucide-react";
 import { cn, formatNumber, formatTime, getOSVersionLabel, getMacModelLabel } from "@/lib/utils";
-import type { Reply as ReplyType, Post } from "@/types";
+import type { Reply as ReplyType, Post, FavoriteGroup } from "@/types";
+
+const DEFAULT_GROUP_COLOR = "#007AFF";
 
 type ReplySortType = "latest" | "hot";
 
@@ -700,8 +702,9 @@ export default function PostDetailPage() {
   const [showNewGroupModal, setShowNewGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [showRemarkModal, setShowRemarkModal] = useState(false);
-  const [editingRemarkItemId, setEditingRemarkItemId] = useState<string | null>(null);
-  const [remarkText, setRemarkText] = useState("");
+  const [remarkTargetGroup, setRemarkTargetGroup] = useState<FavoriteGroup | null>(null);
+  const [remarkValue, setRemarkValue] = useState("");
+  const [remarkMode, setRemarkMode] = useState<"add" | "edit">("add");
   const repliesEndRef = useRef<HTMLDivElement>(null);
 
   const isAuthorBlocked = post ? getBlockedUserIds().includes(post.authorId) : false;
@@ -765,22 +768,74 @@ export default function PostDetailPage() {
     setShowNewGroupModal(false);
   };
 
-  const handleOpenRemarkModal = (itemId: string, currentRemark?: string) => {
-    setEditingRemarkItemId(itemId);
-    setRemarkText(currentRemark || "");
+  const getPostFavoriteItems = (postId: string) => {
+    return favoriteItems.filter((fi) => fi.targetId === postId);
+  };
+
+  const handleGroupClick = (group: FavoriteGroup) => {
+    if (!post) return;
+
+    const isFavorited = postFavGroups.includes(group.id);
+    const favItem = getPostFavoriteItems(post.id).find((fi) => fi.groupId === group.id);
+
+    if (isFavorited) {
+      setRemarkTargetGroup(group);
+      setRemarkValue(favItem?.remark || "");
+      setRemarkMode("edit");
+      setShowRemarkModal(true);
+    } else {
+      setRemarkTargetGroup(group);
+      setRemarkValue("");
+      setRemarkMode("add");
+      setShowRemarkModal(true);
+    }
+  };
+
+  const handleOpenRemarkModal = (group: FavoriteGroup) => {
+    if (!post) return;
+
+    const favItem = getPostFavoriteItems(post.id).find((fi) => fi.groupId === group.id);
+    setRemarkTargetGroup(group);
+    setRemarkValue(favItem?.remark || "");
+    setRemarkMode("edit");
     setShowRemarkModal(true);
   };
 
-  const handleSaveRemark = () => {
-    if (!editingRemarkItemId) return;
-    setFavoriteItemRemark(editingRemarkItemId, remarkText.trim());
+  const handleRemoveFromGroup = () => {
+    if (!post || !remarkTargetGroup) return;
+
+    toggleFavoriteInGroup(post.id, remarkTargetGroup.id);
     setShowRemarkModal(false);
-    setEditingRemarkItemId(null);
-    setRemarkText("");
+    setRemarkTargetGroup(null);
+    setRemarkValue("");
   };
 
-  const getPostFavoriteItems = (postId: string) => {
-    return favoriteItems.filter((fi) => fi.targetId === postId);
+  const handleSaveRemark = () => {
+    if (!post || !remarkTargetGroup) return;
+
+    if (remarkMode === "add") {
+      toggleFavoriteInGroup(post.id, remarkTargetGroup.id);
+
+      setTimeout(() => {
+        const favItem = favoriteItems.find(
+          (fi) => fi.targetId === post!.id && fi.groupId === remarkTargetGroup!.id
+        );
+        if (favItem && remarkValue.trim()) {
+          setFavoriteItemRemark(favItem.id, remarkValue.trim());
+        }
+      }, 0);
+    } else {
+      const favItem = getPostFavoriteItems(post.id).find(
+        (fi) => fi.groupId === remarkTargetGroup.id
+      );
+      if (favItem) {
+        setFavoriteItemRemark(favItem.id, remarkValue.trim());
+      }
+    }
+
+    setShowRemarkModal(false);
+    setRemarkTargetGroup(null);
+    setRemarkValue("");
   };
 
   if (!post) {
@@ -1064,6 +1119,7 @@ export default function PostDetailPage() {
                         : []),
                       ...favoriteGroups.map<DropdownItem>((g) => {
                         const favItem = getPostFavoriteItems(post.id).find((fi) => fi.groupId === g.id);
+                        const isFavorited = postFavGroups.includes(g.id);
                         const hasRemark = !!favItem?.remark;
                         return {
                           key: g.id,
@@ -1072,41 +1128,62 @@ export default function PostDetailPage() {
                               <span
                                 className="w-4 h-4 rounded border flex items-center justify-center flex-shrink-0"
                                 style={{
-                                  borderColor: postFavGroups.includes(g.id) ? g.color : "var(--app-border)",
-                                  background: postFavGroups.includes(g.id) ? g.color : "transparent",
+                                  borderColor: isFavorited ? g.color : "var(--app-border)",
+                                  background: isFavorited ? g.color : "transparent",
                                 }}
                               >
-                                {postFavGroups.includes(g.id) && (
+                                {isFavorited && (
                                   <span className="text-white text-[10px]">✓</span>
                                 )}
                               </span>
                               <span
                                 className="w-2 h-2 rounded-full flex-shrink-0"
-                                style={{ background: g.color }}
+                                style={{ background: g.color || DEFAULT_GROUP_COLOR }}
                               />
                               <span className="flex-1 min-w-0 truncate">{g.name}</span>
-                              {hasRemark && postFavGroups.includes(g.id) && (
+                              {isFavorited && hasRemark && (
+                                <Tooltip content={favItem!.remark!.length > 20 ? favItem!.remark!.slice(0, 20) + "..." : favItem!.remark!}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenRemarkModal(g);
+                                    }}
+                                    className="w-5 h-5 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5 flex-shrink-0"
+                                    style={{ color: "var(--app-text-secondary)" }}
+                                  >
+                                    <MessageSquare className="w-3 h-3" />
+                                  </button>
+                                </Tooltip>
+                              )}
+                              {isFavorited && !hasRemark && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    if (favItem) {
-                                      handleOpenRemarkModal(favItem.id, favItem.remark);
-                                    }
+                                    handleOpenRemarkModal(g);
                                   }}
                                   className="w-5 h-5 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5 flex-shrink-0"
                                   style={{ color: "var(--app-text-secondary)" }}
-                                  title={favItem?.remark || "编辑备注"}
+                                  title="编辑备注"
                                 >
-                                  <MessageSquare className="w-3 h-3" />
+                                  <Pencil className="w-3 h-3" />
                                 </button>
+                              )}
+                              {!isFavorited && (
+                                <span
+                                  className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 transition-colors"
+                                  style={{ color: "var(--app-accent)" }}
+                                >
+                                  + 添加备注
+                                </span>
                               )}
                               <span className="text-[10px] flex-shrink-0" style={{ color: "var(--app-text-tertiary)" }}>
                                 {g.itemCount}
                               </span>
                             </span>
                           ),
-                          onClick: () => toggleFavoriteInGroup(post.id, g.id),
+                          onClick: () => handleGroupClick(g),
                         };
                       }),
                       { key: "div2", label: "", divider: true } as DropdownItem,
@@ -1251,15 +1328,17 @@ export default function PostDetailPage() {
                                     >
                                       {g?.name || "未分组"}
                                     </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenRemarkModal(fi.id, fi.remark)}
-                                      className="w-4 h-4 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
-                                      style={{ color: "var(--app-text-secondary)" }}
-                                      title="编辑备注"
-                                    >
-                                      <Pencil className="w-2.5 h-2.5" />
-                                    </button>
+                                    {g && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenRemarkModal(g)}
+                                        className="w-4 h-4 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                                        style={{ color: "var(--app-text-secondary)" }}
+                                        title="编辑备注"
+                                      >
+                                        <Pencil className="w-2.5 h-2.5" />
+                                      </button>
+                                    )}
                                   </div>
                                   <p
                                     className="text-[11px] italic line-clamp-2"
@@ -1563,54 +1642,44 @@ export default function PostDetailPage() {
         open={showRemarkModal}
         onClose={() => {
           setShowRemarkModal(false);
-          setEditingRemarkItemId(null);
-          setRemarkText("");
+          setRemarkTargetGroup(null);
+          setRemarkValue("");
         }}
         title={
           <div className="flex items-center gap-2">
-            <MessageSquare className="w-5 h-5" style={{ color: "var(--app-accent)" }} />
-            编辑备注
+            <span className="w-3 h-3 rounded-full" style={{ background: remarkTargetGroup?.color || DEFAULT_GROUP_COLOR }} />
+            <span>{remarkMode === 'add' ? '收藏到' : '编辑备注'}「{remarkTargetGroup?.name}」</span>
           </div>
         }
         footer={
           <>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setShowRemarkModal(false);
-                setEditingRemarkItemId(null);
-                setRemarkText("");
-              }}
-            >
+            {remarkMode === 'edit' && (
+              <Button variant="danger" onClick={handleRemoveFromGroup}>
+                <Trash2 className="w-4 h-4" />
+                取消收藏
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => {
+              setShowRemarkModal(false);
+              setRemarkTargetGroup(null);
+              setRemarkValue("");
+            }}>
               取消
             </Button>
-            <Button
-              variant="primary"
-              onClick={handleSaveRemark}
-              leftIcon={<Pencil className="w-4 h-4" />}
-            >
-              保存
+            <Button variant="primary" onClick={handleSaveRemark} disabled={remarkMode === 'add' && !remarkValue.trim()}>
+              {remarkMode === 'add' ? '收藏' : '保存备注'}
             </Button>
           </>
         }
       >
-        <div className="space-y-3">
-          <label className="block text-sm font-medium" style={{ color: "var(--app-text-primary)" }}>
-            备注内容
-          </label>
-          <textarea
-            value={remarkText}
-            onChange={(e) => setRemarkText(e.target.value)}
-            placeholder="添加备注，方便日后查找..."
-            rows={4}
-            className="mac-input resize-none"
-            autoFocus
-            maxLength={500}
-          />
-          <div className="text-right text-[10px]" style={{ color: "var(--app-text-tertiary)" }}>
-            {remarkText.length} / 500
-          </div>
-        </div>
+        <textarea
+          className="mac-input resize-none"
+          rows={4}
+          placeholder="添加备注，方便后续搜索和整理..."
+          value={remarkValue}
+          onChange={(e) => setRemarkValue(e.target.value)}
+          autoFocus
+        />
       </Modal>
     </div>
   );

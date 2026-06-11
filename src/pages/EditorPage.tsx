@@ -142,7 +142,7 @@ export default function EditorPage() {
     () =>
       debounce(() => {
         setAutoSaveStatus("saving");
-        saveDraft({
+        const newDraftId = saveDraft({
           id: editorDraftId,
           title,
           content,
@@ -152,13 +152,16 @@ export default function EditorPage() {
           macModel,
           images: uploadedImages.map((i) => i.url),
         });
+        if (!editorDraftId && newDraftId) {
+          setShowEditor(true, newDraftId);
+        }
         setTimeout(() => {
           setLastSavedAt(new Date());
           setAutoSaveStatus("saved");
           setTimeout(() => setAutoSaveStatus("idle"), 2000);
         }, 500);
       }, 3000),
-    [title, content, categoryId, selectedTags, osVersion, macModel, uploadedImages, editorDraftId, saveDraft]
+    [title, content, categoryId, selectedTags, osVersion, macModel, uploadedImages, editorDraftId, saveDraft, setShowEditor]
   );
 
   useEffect(() => {
@@ -321,7 +324,7 @@ export default function EditorPage() {
 
   const handleSaveDraft = useCallback(() => {
     setAutoSaveStatus("saving");
-    const result = saveDraft({
+    const newDraftId = saveDraft({
       id: editorDraftId,
       title,
       content,
@@ -331,13 +334,16 @@ export default function EditorPage() {
       macModel,
       images: uploadedImages.map((i) => i.url),
     });
+    if (!editorDraftId && newDraftId) {
+      setShowEditor(true, newDraftId);
+    }
     setTimeout(() => {
       setLastSavedAt(new Date());
       setAutoSaveStatus("saved");
       setTimeout(() => setAutoSaveStatus("idle"), 2000);
     }, 300);
-    return result;
-  }, [editorDraftId, title, content, categoryId, selectedTags, osVersion, macModel, uploadedImages, saveDraft]);
+    return newDraftId;
+  }, [editorDraftId, title, content, categoryId, selectedTags, osVersion, macModel, uploadedImages, saveDraft, setShowEditor]);
 
   const handlePublish = useCallback(() => {
     if (!canPublish) return;
@@ -353,15 +359,11 @@ export default function EditorPage() {
       draftId: editorDraftId,
     });
 
-    if (editorDraftId) {
-      deleteDraft(editorDraftId);
-    }
-
-    setShowEditor(false);
+    setShowEditor(false, undefined);
     setActivePanel("feed");
     setActivePost(postId);
     toast.success("发布成功", "你的帖子已成功发布");
-  }, [canPublish, title, content, categoryId, selectedTags, osVersion, macModel, uploadedImages, editorDraftId, createPost, deleteDraft, setShowEditor, setActivePanel, setActivePost, toast]);
+  }, [canPublish, title, content, categoryId, selectedTags, osVersion, macModel, uploadedImages, editorDraftId, createPost, setShowEditor, setActivePanel, setActivePost, toast]);
 
   const handleDiscard = useCallback(() => {
     if (editorDraftId && !keepDraftOnDiscard) {
@@ -519,6 +521,7 @@ export default function EditorPage() {
                   }))
                 );
                 setLastSavedAt(new Date(d.savedAt));
+                setShowEditor(true, d.id);
               },
             }))}
             placement="bottom-right"

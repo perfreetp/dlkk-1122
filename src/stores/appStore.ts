@@ -79,7 +79,7 @@ interface AppState {
   setActiveConversation: (id?: string) => void;
   sendMessage: (conversationId: string, content: string) => void;
   markConversationRead: (id: string) => void;
-  saveDraft: (draft: Partial<Draft> & { content: string }) => void;
+  saveDraft: (draft: Partial<Draft> & { content: string }) => string;
   deleteDraft: (id: string) => void;
   setShowEditor: (show: boolean, draftId?: string) => void;
   toggleShowSearch: () => void;
@@ -322,39 +322,65 @@ export const useAppStore = create<AppState>()(
           conversations: s.conversations.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)),
         })),
 
-      saveDraft: (draft) =>
-        set((s) => {
-          if (draft.id) {
-            return {
-              drafts: s.drafts.map((d) =>
-                d.id === draft.id
-                  ? {
-                      ...d,
-                      ...draft,
-                      tagIds: draft.tagIds || d.tagIds,
-                      images: draft.images || d.images,
-                      savedAt: new Date().toISOString(),
-                    }
-                  : d
-              ),
-            };
-          }
-          return {
-            drafts: [
-              {
-                id: `d-${Date.now()}`,
-                title: draft.title || "",
-                content: draft.content,
-                categoryId: draft.categoryId,
-                tagIds: draft.tagIds || [],
-                images: draft.images || [],
-                savedAt: new Date().toISOString(),
-                autoSaved: true,
-              },
-              ...s.drafts,
-            ],
-          };
-        }),
+      saveDraft: (draft) => {
+        const s = get();
+        const now = new Date().toISOString();
+        if (draft.id) {
+          const draftId = draft.id;
+          set({
+            drafts: s.drafts.map((d) =>
+              d.id === draftId
+                ? {
+                    ...d,
+                    ...draft,
+                    tagIds: draft.tagIds || d.tagIds,
+                    images: draft.images || d.images,
+                    savedAt: now,
+                    autoSaved: false,
+                  }
+                : d
+            ),
+          });
+          return draftId;
+        }
+        const existingSame = s.drafts.find(
+          (d) => d.title === draft.title && d.content === draft.content
+        );
+        if (existingSame) {
+          set({
+            drafts: s.drafts.map((d) =>
+              d.id === existingSame.id
+                ? {
+                    ...d,
+                    ...draft,
+                    tagIds: draft.tagIds || d.tagIds,
+                    images: draft.images || d.images,
+                    savedAt: now,
+                    autoSaved: false,
+                  }
+                : d
+            ),
+          });
+          return existingSame.id;
+        }
+        const newDraftId = `d-${Date.now()}`;
+        set({
+          drafts: [
+            {
+              id: newDraftId,
+              title: draft.title || "",
+              content: draft.content,
+              categoryId: draft.categoryId,
+              tagIds: draft.tagIds || [],
+              images: draft.images || [],
+              savedAt: now,
+              autoSaved: true,
+            },
+            ...s.drafts,
+          ],
+        });
+        return newDraftId;
+      },
 
       deleteDraft: (id) => set((s) => ({ drafts: s.drafts.filter((d) => d.id !== id) })),
 
@@ -500,9 +526,11 @@ export const useAppStore = create<AppState>()(
           const newState: Partial<AppState> = {
             posts: [newPost, ...state.posts],
           };
-          if (data.draftId) {
-            newState.drafts = state.drafts.filter((d) => d.id !== data.draftId);
-          }
+          newState.drafts = state.drafts.filter((d) => {
+            if (data.draftId && d.id === data.draftId) return false;
+            if (d.title === data.title && d.content === data.content) return false;
+            return true;
+          });
           return newState;
         });
         return newPost.id;

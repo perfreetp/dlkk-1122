@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useAppStore } from "@/stores/appStore";
-import { USERS, POSTS, REPLIES, FAVORITE_GROUPS, FAVORITE_ITEMS } from "@/mock";
+import { USERS } from "@/mock";
 import { PostCard } from "./FeedPage";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
@@ -28,8 +28,10 @@ import {
   ThumbsUp,
   Apple,
 } from "lucide-react";
-import { cn, formatNumber, formatDate, getOSVersionLabel, getMacModelLabel } from "@/lib/utils";
+import { formatNumber, formatDate, getOSVersionLabel, getMacModelLabel } from "@/lib/utils";
 import type { TabItem } from "@/components/ui/Tabs";
+import type { Post, Reply, FavoriteItem, FavoriteGroup } from "@/types";
+import type { CSSProperties } from "react";
 
 const COVER_GRADIENTS = [
   "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -62,6 +64,9 @@ export default function ProfilePage() {
     getFilteredPosts,
     getBlockedUserIds,
     getRepliesByPostId,
+    favoriteItems,
+    favoriteGroups,
+    getPostById,
   } = useAppStore();
 
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
@@ -87,7 +92,7 @@ export default function ProfilePage() {
   }, [user.id, getFilteredPosts]);
 
   const userReplies = useMemo(() => {
-    const allReplies: any[] = [];
+    const allReplies: (Reply & { postTitle: string })[] = [];
     const posts = getFilteredPosts();
     posts.forEach((post) => {
       const replies = getRepliesByPostId(post.id);
@@ -98,7 +103,18 @@ export default function ProfilePage() {
     return allReplies.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [user.id, getFilteredPosts, getRepliesByPostId]);
 
-  const userFavorites = isOwn ? FAVORITE_ITEMS : FAVORITE_ITEMS.slice(0, 3);
+  const userFavorites = useMemo(() => {
+    type FavoriteWithPost = FavoriteItem & { post?: Post; group?: FavoriteGroup };
+    const items = isOwn
+      ? favoriteItems.filter((i) => i.targetType === "post")
+      : favoriteItems.filter((i) => i.targetType === "post").slice(0, 6);
+    
+    return items.map((item): FavoriteWithPost => {
+      const post = getPostById(item.targetId);
+      const group = favoriteGroups.find((g) => g.id === item.groupId);
+      return { ...item, post, group };
+    });
+  }, [isOwn, favoriteItems, favoriteGroups, getPostById]);
 
   const followingUsers = USERS.filter(
     (u) => u.id !== user.id && u.level > user.level * 0.5
@@ -186,7 +202,7 @@ export default function ProfilePage() {
   const renderRepliesTab = () =>
     userReplies.length > 0 ? (
       <div className="space-y-3">
-        {userReplies.map((reply: any) => (
+        {userReplies.map((reply) => (
           <div
             key={reply.id}
             onClick={() => setActivePost(reply.postId)}
@@ -210,12 +226,21 @@ export default function ProfilePage() {
                   {reply.postTitle || "(已删除)"}
                 </span>
               </span>
+              {reply.isEdited && !reply.isDeleted && (
+                <Badge variant="gray" size="sm">
+                  已编辑
+                </Badge>
+              )}
             </div>
             <div
               className="mt-2 text-sm line-clamp-3 pl-6"
               style={{ color: "var(--app-text-secondary)" }}
             >
-              {reply.content}
+              {reply.isDeleted ? (
+                <span className="italic opacity-60">该回复已被撤回</span>
+              ) : (
+                reply.content
+              )}
             </div>
             <div
               className="mt-3 flex items-center justify-between pl-6 text-xs"
@@ -244,11 +269,7 @@ export default function ProfilePage() {
         {userFavorites.map((item) => (
           <div
             key={item.id}
-            onClick={() =>
-              item.targetType === "post" &&
-              item.target &&
-              setActivePost((item.target as any).id)
-            }
+            onClick={() => item.targetType === "post" && item.post && setActivePost(item.post.id)}
             className="rounded-xl p-4 flex items-start gap-3 transition-all cursor-pointer hover:shadow-sm"
             style={{
               background: "var(--app-surface)",
@@ -268,14 +289,32 @@ export default function ProfilePage() {
                 className="text-sm font-semibold line-clamp-2"
                 style={{ color: "var(--app-text-primary)" }}
               >
-                {(item.target as any)?.title || "(无标题)"}
+                {item.post?.title || "(无标题)"}
               </div>
+              {item.post?.content && (
+                <div
+                  className="text-xs mt-1 line-clamp-1"
+                  style={{ color: "var(--app-text-secondary)" }}
+                >
+                  {item.post.content.replace(/[#*`[\]()>-]/g, "").slice(0, 80)}...
+                </div>
+              )}
               <div
-                className="text-xs mt-1 flex items-center gap-2"
+                className="text-xs mt-2 flex items-center gap-2 flex-wrap"
                 style={{ color: "var(--app-text-tertiary)" }}
               >
-                {FAVORITE_GROUPS.find((g) => g.id === item.groupId)?.name}
-                <span>·</span>
+                {item.group?.name && (
+                  <span
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded"
+                    style={{
+                      background: `${item.group.color || "#007AFF"}15`,
+                      color: item.group.color || "#007AFF",
+                    }}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: item.group.color || "#007AFF" }} />
+                    {item.group.name}
+                  </span>
+                )}
                 <span>{formatDate(item.addedAt)}</span>
               </div>
             </div>
@@ -482,7 +521,7 @@ export default function ProfilePage() {
                       boxShadow:
                         "0 0 0 4px var(--app-bg), 0 8px 24px -8px rgba(0,0,0,0.15)",
                       "--tw-ring-color": "var(--app-border)",
-                    } as any}
+                    } as CSSProperties}
                   />
                   <div
                     className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full flex items-center justify-center shadow-md"
@@ -504,12 +543,12 @@ export default function ProfilePage() {
                       {user.nickname}
                     </h1>
                     {user.badges?.slice(0, 3).map((badge) => {
-                      const Icon = (LucideIcons as any)[badge.icon];
+                      const Icon = (LucideIcons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[badge.icon];
                       return (
                         <Badge
                           key={badge.id}
                           size="sm"
-                          style={{ background: badge.color } as any}
+                          style={{ background: badge.color } as CSSProperties}
                         >
                           {Icon && <Icon className="w-3 h-3 mr-0.5" />}
                           {badge.name}

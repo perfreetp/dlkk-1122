@@ -7,6 +7,8 @@ import Button from "@/components/ui/Button";
 import Dropdown, { type DropdownItem } from "@/components/ui/Dropdown";
 import Empty from "@/components/ui/Empty";
 import Modal from "@/components/ui/Modal";
+import Tabs from "@/components/ui/Tabs";
+import type { TabItem } from "@/components/ui/Tabs";
 import {
   Plus,
   Pencil,
@@ -31,8 +33,12 @@ import {
   ArrowUp,
   ArrowDown,
   Palette,
+  LayoutGrid,
+  List,
+  User,
+  Tag,
 } from "lucide-react";
-import { cn, formatTime, formatNumber } from "@/lib/utils";
+import { cn, formatTime, formatNumber, formatDate } from "@/lib/utils";
 import type { Post, Reply } from "@/types";
 
 const SORT_OPTIONS = [
@@ -58,6 +64,15 @@ const GROUP_COLORS = [
 
 const DEFAULT_GROUP_COLOR = "#007AFF";
 
+const ORGANIZE_TABS: TabItem[] = [
+  { key: "author", label: "按作者", icon: <User className="w-4 h-4" /> },
+  { key: "tag", label: "按标签", icon: <Tag className="w-4 h-4" /> },
+  { key: "color", label: "按分组颜色", icon: <Palette className="w-4 h-4" /> },
+];
+
+type ViewMode = "grid" | "organize";
+type OrganizeBy = "author" | "tag" | "color";
+
 export default function FavoritesPage() {
   const {
     favoriteGroups: storeGroups,
@@ -75,6 +90,7 @@ export default function FavoritesPage() {
     reorderFavoriteGroups,
     updateFavoriteGroup,
     setFavoriteItemRemark,
+    getPostById,
   } = useAppStore();
 
   const groups = storeGroups.length > 0 ? storeGroups : MOCK_GROUPS;
@@ -100,9 +116,32 @@ export default function FavoritesPage() {
   const [showRemarkModal, setShowRemarkModal] = useState(false);
   const [editingRemarkItemId, setEditingRemarkItemId] = useState<string | null>(null);
   const [remarkText, setRemarkText] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [organizeBy, setOrganizeBy] = useState<OrganizeBy>("author");
 
   const activeGroup = groups.find((g) => g.id === activeFavoriteGroupId);
+
   const activeGroupItems = useMemo(() => {
+    const getHitTypes = (item: typeof items[0], kw: string): string[] => {
+      const hitTypes: string[] = [];
+      if (!kw) return hitTypes;
+      
+      const kwLower = kw.toLowerCase();
+      const target = item.target as Post | Reply | undefined;
+      const post = target as Post;
+      const reply = target as Reply;
+      
+      const postTitle = post?.title || "";
+      const authorNickname = post?.author?.nickname || reply?.author?.nickname || "";
+      const remark = item.remark || "";
+      
+      if (postTitle.toLowerCase().includes(kwLower)) hitTypes.push("标题");
+      if (remark.toLowerCase().includes(kwLower)) hitTypes.push("备注");
+      if (authorNickname.toLowerCase().includes(kwLower)) hitTypes.push("作者");
+      
+      return hitTypes;
+    };
+
     let result =
       activeFavoriteGroupId === "fg1"
         ? items
@@ -146,8 +185,89 @@ export default function FavoritesPage() {
       return ta.localeCompare(tb);
     });
 
-    return result;
+    return result.map((item) => ({
+      ...item,
+      hitTypes: getHitTypes(item, searchQuery),
+    }));
   }, [items, activeFavoriteGroupId, searchQuery, sortBy]);
+
+  const organizedData = useMemo(() => {
+    type ItemWithPost = (typeof activeGroupItems)[number] & {
+      post?: Post;
+      group?: typeof groups[number];
+      hitTypes: string[];
+    };
+
+    type OrganizedSection = {
+      key: string;
+      title: string;
+      subtitle?: string;
+      avatar?: string;
+      color?: string;
+      items: ItemWithPost[];
+    };
+
+    const itemsWithPost = activeGroupItems
+      .filter((item) => item.targetType === "post")
+      .map((item) => {
+        const post = (item.target as Post) || getPostById(item.targetId);
+        const group = groups.find((g) => g.id === item.groupId);
+        return { ...item, post, group, hitTypes: (item as { hitTypes: string[] }).hitTypes };
+      })
+      .filter((item) => !!item.post) as (ItemWithPost & { post: Post })[];
+
+    if (organizeBy === "author") {
+      const map = new Map<string, ItemWithPost[]>();
+      itemsWithPost.forEach((item) => {
+        const authorId = item.post.authorId;
+        if (!map.has(authorId)) map.set(authorId, []);
+        map.get(authorId)!.push(item);
+      });
+      return Array.from(map.entries()).map<OrganizedSection>(([authorId, items]) => ({
+        key: authorId,
+        title: items[0].post.author.nickname,
+        subtitle: `@${items[0].post.author.username}`,
+        avatar: items[0].post.author.avatar,
+        items,
+      }));
+    }
+
+    if (organizeBy === "tag") {
+      const map = new Map<string, ItemWithPost[]>();
+      itemsWithPost.forEach((item) => {
+        item.post.tags.forEach((tag) => {
+          if (!map.has(tag.id)) map.set(tag.id, []);
+          map.get(tag.id)!.push(item);
+        });
+      });
+      return Array.from(map.entries()).map<OrganizedSection>(([tagId, items]) => {
+        const tag = items[0].post.tags.find((t) => t.id === tagId)!;
+        return {
+          key: tagId,
+          title: tag.name,
+          color: tag.color,
+          items,
+        };
+      });
+    }
+
+    if (organizeBy === "color") {
+      const map = new Map<string, ItemWithPost[]>();
+      itemsWithPost.forEach((item) => {
+        const color = item.group?.color || DEFAULT_GROUP_COLOR;
+        if (!map.has(color)) map.set(color, []);
+        map.get(color)!.push(item);
+      });
+      return Array.from(map.entries()).map<OrganizedSection>(([color, items]) => ({
+        key: color,
+        title: items[0].group?.name || "未分组",
+        color,
+        items,
+      }));
+    }
+
+    return [] as OrganizedSection[];
+  }, [activeGroupItems, organizeBy, groups, getPostById]);
 
   const toggleSelect = (id: string) => {
     setSelectedItems((prev) => {
@@ -528,6 +648,39 @@ export default function FavoritesPage() {
                 )}
               </div>
 
+              <div className="flex items-center rounded-full overflow-hidden border" style={{ borderColor: "var(--app-border)" }}>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("grid")}
+                  className={cn(
+                    "px-3 py-1.5 text-xs flex items-center gap-1.5 transition-all",
+                    viewMode === "grid" ? "font-medium" : "hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                  style={{
+                    background: viewMode === "grid" ? "var(--app-accent)" : "transparent",
+                    color: viewMode === "grid" ? "#fff" : "var(--app-text-secondary)",
+                  }}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  网格
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("organize")}
+                  className={cn(
+                    "px-3 py-1.5 text-xs flex items-center gap-1.5 transition-all",
+                    viewMode === "organize" ? "font-medium" : "hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                  style={{
+                    background: viewMode === "organize" ? "var(--app-accent)" : "transparent",
+                    color: viewMode === "organize" ? "#fff" : "var(--app-text-secondary)",
+                  }}
+                >
+                  <List className="w-3.5 h-3.5" />
+                  整理
+                </button>
+              </div>
+
               <Dropdown
                 trigger={
                   <Button variant="secondary" size="sm" rightIcon={<ArrowUpDown className="w-3.5 h-3.5" />}>
@@ -623,7 +776,124 @@ export default function FavoritesPage() {
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-5">
-          {activeGroupItems.length > 0 ? (
+          {viewMode === "organize" ? (
+            <div className="space-y-6">
+              <Tabs
+                items={ORGANIZE_TABS}
+                activeKey={organizeBy}
+                onChange={(key) => setOrganizeBy(key as OrganizeBy)}
+                variant="segmented"
+                className="mb-4"
+              />
+
+              {organizedData.length > 0 ? (
+                organizedData.map((section) => (
+                  <section key={section.key}>
+                    <div className="flex items-center gap-3 mb-3">
+                      {section.avatar ? (
+                        <Avatar src={section.avatar} name={section.title} size="md" />
+                      ) : (
+                        <span
+                          className="w-8 h-8 rounded-full flex-shrink-0"
+                          style={{ background: section.color || DEFAULT_GROUP_COLOR }}
+                        />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3
+                            className="text-sm font-semibold truncate"
+                            style={{ color: "var(--app-text-primary)" }}
+                          >
+                            {section.title}
+                          </h3>
+                          {section.color && (
+                            <span
+                              className="w-2 h-2 rounded-full flex-shrink-0"
+                              style={{ background: section.color }}
+                            />
+                          )}
+                        </div>
+                        {section.subtitle && (
+                          <p
+                            className="text-xs truncate"
+                            style={{ color: "var(--app-text-tertiary)" }}
+                          >
+                            {section.subtitle}
+                          </p>
+                        )}
+                      </div>
+                      <Badge variant="gray" size="sm" count={section.items.length} />
+                    </div>
+
+                    <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+                      {section.items.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => item.post && setActivePost(item.post.id)}
+                          className="flex-shrink-0 w-56 rounded-xl p-3 cursor-pointer transition-all hover:shadow-md"
+                          style={{
+                            background: "var(--app-surface)",
+                            border: "1px solid var(--app-border)",
+                          }}
+                        >
+                          {item.hitTypes?.length > 0 && (
+                            <div className="flex items-center gap-1 mb-2 flex-wrap">
+                              {item.hitTypes.map((type) => (
+                                <span
+                                  key={type}
+                                  className="text-[9px] px-1.5 py-0.5 rounded-full"
+                                  style={{
+                                    background: "var(--app-accent)",
+                                    color: "#fff",
+                                  }}
+                                >
+                                  命中：{type}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <h4
+                            className="text-xs font-semibold line-clamp-2 mb-2"
+                            style={{ color: "var(--app-text-primary)" }}
+                          >
+                            {item.post?.title || "(无标题)"}
+                          </h4>
+                          {item.remark && (
+                            <p
+                              className="text-[10px] italic line-clamp-1 mb-2"
+                              style={{ color: "var(--app-text-secondary)" }}
+                            >
+                              {item.remark}
+                            </p>
+                          )}
+                          <div
+                            className="flex items-center justify-between text-[9px]"
+                            style={{ color: "var(--app-text-tertiary)" }}
+                          >
+                            <span>{formatDate(item.addedAt)}</span>
+                            {item.group && (
+                              <span
+                                className="inline-flex items-center gap-1"
+                                style={{ color: item.group.color || DEFAULT_GROUP_COLOR }}
+                              >
+                                <span
+                                  className="w-1.5 h-1.5 rounded-full"
+                                  style={{ background: item.group.color || DEFAULT_GROUP_COLOR }}
+                                />
+                                {item.group.name}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))
+              ) : (
+                <Empty type="favorites" title="该维度下暂无收藏内容" />
+              )}
+            </div>
+          ) : activeGroupItems.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {activeGroupItems.map((item) => {
                 const post = item.target as Post | undefined;
@@ -659,6 +929,22 @@ export default function FavoritesPage() {
                       }
                     }}
                   >
+                    {(item as { hitTypes?: string[] }).hitTypes?.length > 0 && (
+                      <div className="flex items-center gap-1 mb-2 flex-wrap">
+                        {(item as { hitTypes: string[] }).hitTypes.map((type) => (
+                          <span
+                            key={type}
+                            className="text-[10px] px-1.5 py-0.5 rounded-full"
+                            style={{
+                              background: "var(--app-accent)",
+                              color: "#fff",
+                            }}
+                          >
+                            命中：{type}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {batchMode && (
                       <button
                         type="button"
