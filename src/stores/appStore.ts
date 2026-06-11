@@ -43,6 +43,7 @@ interface AppState {
   favoriteItems: FavoriteItem[];
   activeFavoriteGroupId: string;
   drafts: Draft[];
+  storeReplies: Record<string, Reply[]>;
   activePanel: "feed" | "categories" | "post" | "messages" | "favorites" | "profile" | "settings" | "editor";
   activePostId?: string;
   showEditor: boolean;
@@ -109,6 +110,11 @@ interface AppState {
   addBlockKeyword: (keyword: string) => void;
   removeBlockKeyword: (keyword: string) => void;
   getBlockedKeywords: () => string[];
+  updateReply: (postId: string, replyId: string, data: Partial<Reply>) => Reply | undefined;
+  deleteReply: (postId: string, replyId: string) => void;
+  setFavoriteItemRemark: (itemId: string, remark: string) => void;
+  reorderFavoriteGroups: (orderedIds: string[]) => void;
+  updateFavoriteGroup: (id: string, data: { name?: string; color?: string; description?: string }) => void;
 }
 
 const defaultShortcuts: Record<string, string> = {};
@@ -147,6 +153,7 @@ export const useAppStore = create<AppState>()(
       favoriteItems: FAVORITE_ITEMS,
       activeFavoriteGroupId: "fg1",
       drafts: DRAFTS,
+      storeReplies: { ...REPLIES },
       activePanel: "feed",
       showEditor: false,
       showSearch: false,
@@ -593,12 +600,13 @@ export const useAppStore = create<AppState>()(
       },
 
       getRepliesByPostId: (postId) => {
-        return REPLIES[postId] || [];
+        const storeReplies = get().storeReplies;
+        return get().getFilteredReplies(storeReplies[postId] || []);
       },
 
       addReply: (postId, data) => {
         const s = get();
-        const postReplies = REPLIES[postId] || [];
+        const postReplies = s.storeReplies[postId] || [];
         const nextFloor = postReplies.length > 0 ? Math.max(...postReplies.map((r) => r.floor)) + 1 : 1;
         const now = new Date().toISOString();
         const newReply: Reply = {
@@ -617,11 +625,11 @@ export const useAppStore = create<AppState>()(
           createdAt: now,
           isLiked: false,
         };
-        if (!REPLIES[postId]) {
-          REPLIES[postId] = [];
-        }
-        REPLIES[postId].push(newReply);
         set((state) => ({
+          storeReplies: {
+            ...state.storeReplies,
+            [postId]: [...(state.storeReplies[postId] || []), newReply],
+          },
           posts: state.posts.map((p) =>
             p.id === postId
               ? { ...p, replyCount: p.replyCount + 1, lastReplyAt: now }
@@ -630,6 +638,71 @@ export const useAppStore = create<AppState>()(
         }));
         return newReply;
       },
+
+      updateReply: (postId, replyId, data) => {
+        const s = get();
+        const postReplies = s.storeReplies[postId];
+        if (!postReplies) return undefined;
+        const replyIndex = postReplies.findIndex((r) => r.id === replyId);
+        if (replyIndex === -1) return undefined;
+        const now = new Date().toISOString();
+        const updatedReply: Reply = {
+          ...postReplies[replyIndex],
+          ...data,
+          isEdited: true,
+          editedAt: now,
+        };
+        const newReplies = [...postReplies];
+        newReplies[replyIndex] = updatedReply;
+        set({
+          storeReplies: {
+            ...s.storeReplies,
+            [postId]: newReplies,
+          },
+        });
+        return updatedReply;
+      },
+
+      deleteReply: (postId, replyId) => {
+        const s = get();
+        const postReplies = s.storeReplies[postId];
+        if (!postReplies) return;
+        const now = new Date().toISOString();
+        set({
+          storeReplies: {
+            ...s.storeReplies,
+            [postId]: postReplies.map((r) =>
+              r.id === replyId
+                ? { ...r, isDeleted: true, deletedAt: now }
+                : r
+            ),
+          },
+        });
+      },
+
+      setFavoriteItemRemark: (itemId, remark) =>
+        set((s) => ({
+          favoriteItems: s.favoriteItems.map((fi) =>
+            fi.id === itemId ? { ...fi, remark } : fi
+          ),
+        })),
+
+      reorderFavoriteGroups: (orderedIds) =>
+        set((s) => ({
+          favoriteGroups: s.favoriteGroups
+            .map((g) => ({
+              ...g,
+              order: orderedIds.indexOf(g.id),
+            }))
+            .sort((a, b) => a.order - b.order),
+        })),
+
+      updateFavoriteGroup: (id, data) =>
+        set((s) => ({
+          favoriteGroups: s.favoriteGroups.map((g) =>
+            g.id === id ? { ...g, ...data } : g
+          ),
+        })),
     }),
     {
       name: "mac-forum-store",
@@ -638,6 +711,8 @@ export const useAppStore = create<AppState>()(
         favoriteGroups: s.favoriteGroups,
         favoriteItems: s.favoriteItems,
         drafts: s.drafts,
+        posts: s.posts,
+        storeReplies: s.storeReplies,
       }),
     }
   )

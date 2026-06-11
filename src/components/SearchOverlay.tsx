@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { cn, debounce, stripMarkdown, formatTime } from "@/lib/utils";
 import { useAppStore } from "@/stores/appStore";
 import { Search, X, Hash, FileText, User, MessageSquare, Clock, SlidersHorizontal, ChevronRight } from "lucide-react";
@@ -35,9 +35,10 @@ export default function SearchOverlay() {
   const setActivePost = useAppStore((s) => s.setActivePost);
   const setActiveConversation = useAppStore((s) => s.setActiveConversation);
   const setProfileUserId = useAppStore((s) => s.setProfileUserId);
-  const setActiveCategory = useAppStore((s) => s.setActiveCategory);
   const setFeedFilter = useAppStore((s) => s.setFeedFilter);
   const setActivePanel = useAppStore((s) => s.setActivePanel);
+  const getBlockedUserIds = useAppStore((s) => s.getBlockedUserIds);
+  const getBlockedKeywords = useAppStore((s) => s.getBlockedKeywords);
 
   const [keyword, setKeyword] = useState("");
   const [scope, setScope] = useState<SearchScope>("all");
@@ -65,11 +66,13 @@ export default function SearchOverlay() {
     }
   });
 
-  const saveHistory = (term: string) => {
-    const next = [term, ...history.filter((h) => h !== term)].slice(0, 10);
-    setHistory(next);
-    localStorage.setItem("search-history", JSON.stringify(next));
-  };
+  const saveHistory = useCallback((term: string) => {
+    setHistory((prev) => {
+      const next = [term, ...prev.filter((h) => h !== term)].slice(0, 10);
+      localStorage.setItem("search-history", JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   const clearHistory = () => {
     setHistory([]);
@@ -80,16 +83,31 @@ export default function SearchOverlay() {
     const kw = keyword.trim().toLowerCase();
     if (!kw) return [];
 
+    const blockedUserIds = getBlockedUserIds();
+    const blockedKeywords = getBlockedKeywords();
+
     let list: SearchResult[] = [];
 
     if (scope === "all" || scope === "posts") {
-      const matched = posts.filter(
-        (p) =>
+      const matched = posts.filter((p) => {
+        if (blockedUserIds.includes(p.authorId)) return false;
+        if (blockedKeywords.length > 0) {
+          const titleLower = p.title.toLowerCase();
+          const contentLower = stripMarkdown(p.content).toLowerCase();
+          for (const bw of blockedKeywords) {
+            const bwLower = bw.toLowerCase();
+            if (titleLower.includes(bwLower) || contentLower.includes(bwLower)) {
+              return false;
+            }
+          }
+        }
+        return (
           p.title.toLowerCase().includes(kw) ||
           stripMarkdown(p.content).toLowerCase().includes(kw) ||
           p.tags.some((t) => t.name.toLowerCase().includes(kw)) ||
           p.author.nickname.toLowerCase().includes(kw)
-      );
+        );
+      });
       list = list.concat(
         matched.slice(0, 8).map((p) => ({
           type: "posts",
@@ -122,6 +140,7 @@ export default function SearchOverlay() {
     if (scope === "all" || scope === "users") {
       const userSet = new Map<string, { id: string; nickname: string; avatar: string; signature?: string }>();
       posts.forEach((p) => {
+        if (blockedUserIds.includes(p.authorId)) return;
         if (p.author.nickname.toLowerCase().includes(kw) || p.author.username.toLowerCase().includes(kw)) {
           userSet.set(p.author.id, {
             id: p.author.id,
@@ -149,6 +168,20 @@ export default function SearchOverlay() {
     if (scope === "all" || scope === "tags") {
       const tagSet = new Map<string, { id: string; name: string; color: string; count: number }>();
       posts.forEach((p) => {
+        if (blockedUserIds.includes(p.authorId)) return;
+        if (blockedKeywords.length > 0) {
+          const titleLower = p.title.toLowerCase();
+          const contentLower = p.content.toLowerCase();
+          let blocked = false;
+          for (const bw of blockedKeywords) {
+            const bwLower = bw.toLowerCase();
+            if (titleLower.includes(bwLower) || contentLower.includes(bwLower)) {
+              blocked = true;
+              break;
+            }
+          }
+          if (blocked) return;
+        }
         p.tags.forEach((t) => {
           if (t.name.toLowerCase().includes(kw)) {
             tagSet.set(t.id, {
@@ -181,11 +214,14 @@ export default function SearchOverlay() {
     }
 
     if (scope === "all" || scope === "messages") {
-      const matched = conversations.filter(
-        (c) =>
+      const matched = conversations.filter((c) => {
+        const otherParticipants = c.participants.filter((p) => p.id !== currentUserId);
+        if (otherParticipants.some((p) => blockedUserIds.includes(p.id))) return false;
+        return (
           c.participants.some((p) => p.nickname.toLowerCase().includes(kw)) ||
           (c.lastMessage?.content || "").toLowerCase().includes(kw)
-      );
+        );
+      });
       list = list.concat(
         matched.slice(0, 5).map((c) => {
           const other = c.participants.find((p) => p.id !== currentUserId);
@@ -206,7 +242,11 @@ export default function SearchOverlay() {
     }
 
     return list;
-  }, [keyword, scope, posts, conversations, currentUserId, setActivePost, setActiveConversation, setProfileUserId, history]);
+  }, [keyword, scope, posts, conversations, currentUserId, setActivePost, setActiveConversation, setProfileUserId, setFeedFilter, setActivePanel, saveHistory, getBlockedUserIds, getBlockedKeywords]);
+
+  const hasBlockFilters = useMemo(() => {
+    return getBlockedUserIds().length > 0 || getBlockedKeywords().length > 0;
+  }, [getBlockedUserIds, getBlockedKeywords]);
 
   useEffect(() => {
     if (!showSearch) return;
@@ -345,7 +385,14 @@ export default function SearchOverlay() {
           ) : null}
 
           {keyword && results.length === 0 ? (
-            <Empty type="search" description={`没有找到与「${keyword}」匹配的结果`} />
+            <div>
+              <Empty type="search" description={`没有找到与「${keyword}」匹配的结果`} />
+              {hasBlockFilters && (
+                <p className="text-center text-xs pb-4" style={{ color: "var(--app-text-tertiary)" }}>
+                  部分结果已根据屏蔽设置过滤
+                </p>
+              )}
+            </div>
           ) : null}
 
           {results.length > 0 && (

@@ -88,6 +88,10 @@ export interface Reply {
   isBlocked?: boolean;
   isLiked?: boolean;
   isEssence?: boolean;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  isEdited?: boolean;
+  editedAt?: string;
 }
 
 export interface Conversation {

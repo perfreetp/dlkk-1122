@@ -1,13 +1,12 @@
 import { useState, useMemo } from "react";
 import { useAppStore } from "@/stores/appStore";
-import { FAVORITE_GROUPS as MOCK_GROUPS, FAVORITE_ITEMS as MOCK_ITEMS, POSTS, REPLIES } from "@/mock";
+import { FAVORITE_GROUPS as MOCK_GROUPS, FAVORITE_ITEMS as MOCK_ITEMS, REPLIES } from "@/mock";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Dropdown, { type DropdownItem } from "@/components/ui/Dropdown";
 import Empty from "@/components/ui/Empty";
 import Modal from "@/components/ui/Modal";
-import Tag from "@/components/ui/Tag";
 import {
   Plus,
   Pencil,
@@ -29,9 +28,12 @@ import {
   Move,
   ExternalLink,
   Heart,
+  ArrowUp,
+  ArrowDown,
+  Palette,
 } from "lucide-react";
 import { cn, formatTime, formatNumber } from "@/lib/utils";
-import type { FavoriteItem, Post, Reply } from "@/types";
+import type { Post, Reply } from "@/types";
 
 const SORT_OPTIONS = [
   { key: "added", label: "收藏时间", icon: Clock },
@@ -39,7 +41,22 @@ const SORT_OPTIONS = [
   { key: "alpha", label: "字母序", icon: Type },
 ];
 
-const GROUP_COLORS = ["#007AFF", "#FF9500", "#FF2D55", "#34C759", "#AF52DE", "#30B0C7", "#5856D6"];
+const GROUP_COLORS = [
+  "#007AFF",
+  "#FF3B30",
+  "#FF9500",
+  "#FFCC00",
+  "#34C759",
+  "#00C7BE",
+  "#5856D6",
+  "#AF52DE",
+  "#FF2D55",
+  "#8E8E93",
+  "#636366",
+  "#000000",
+];
+
+const DEFAULT_GROUP_COLOR = "#007AFF";
 
 export default function FavoritesPage() {
   const {
@@ -55,6 +72,9 @@ export default function FavoritesPage() {
     setActivePost,
     getPostFavoriteGroups,
     toggleFavoriteInGroup,
+    reorderFavoriteGroups,
+    updateFavoriteGroup,
+    setFavoriteItemRemark,
   } = useAppStore();
 
   const groups = storeGroups.length > 0 ? storeGroups : MOCK_GROUPS;
@@ -75,7 +95,11 @@ export default function FavoritesPage() {
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
   const [showGroupManageModal, setShowGroupManageModal] = useState(false);
-  const [managePostId, setManagePostId] = useState<string>("");
+  const [managePostId, setManagePostId] = useState("");
+  const [showColorPicker, setShowColorPicker] = useState<string | null>(null);
+  const [showRemarkModal, setShowRemarkModal] = useState(false);
+  const [editingRemarkItemId, setEditingRemarkItemId] = useState<string | null>(null);
+  const [remarkText, setRemarkText] = useState("");
 
   const activeGroup = groups.find((g) => g.id === activeFavoriteGroupId);
   const activeGroupItems = useMemo(() => {
@@ -87,10 +111,23 @@ export default function FavoritesPage() {
     if (searchQuery) {
       const kw = searchQuery.toLowerCase();
       result = result.filter((i) => {
-        const target = i.target as Post | undefined;
+        const target = i.target as Post | Reply | undefined;
+        const postTarget = target as Post & { post?: Post };
+        const replyTarget = target as Reply;
+        const postTitle =
+          (target as Post)?.title ||
+          postTarget?.post?.title ||
+          (replyTarget?.content?.slice(0, 30) || "");
+        const authorNickname =
+          (target as Post)?.author?.nickname ||
+          postTarget?.post?.author?.nickname ||
+          replyTarget?.author?.nickname ||
+          "";
+        const remark = i.remark || "";
         return (
-          target?.title?.toLowerCase().includes(kw) ||
-          target?.author?.nickname?.toLowerCase().includes(kw)
+          postTitle.toLowerCase().includes(kw) ||
+          remark.toLowerCase().includes(kw) ||
+          authorNickname.toLowerCase().includes(kw)
         );
       });
     }
@@ -159,6 +196,43 @@ export default function FavoritesPage() {
     setBatchMode(false);
   };
 
+  const handleMoveGroupUp = (index: number) => {
+    if (index <= 0) return;
+    const orderedGroups = groups.slice().sort((a, b) => a.order - b.order);
+    const newOrdered = [...orderedGroups];
+    [newOrdered[index - 1], newOrdered[index]] = [newOrdered[index], newOrdered[index - 1]];
+    reorderFavoriteGroups(newOrdered.map((g) => g.id));
+  };
+
+  const handleMoveGroupDown = (index: number) => {
+    const orderedGroups = groups.slice().sort((a, b) => a.order - b.order);
+    if (index >= orderedGroups.length - 1) return;
+    const newOrdered = [...orderedGroups];
+    [newOrdered[index + 1], newOrdered[index]] = [newOrdered[index], newOrdered[index + 1]];
+    reorderFavoriteGroups(newOrdered.map((g) => g.id));
+  };
+
+  const handleUpdateGroupColor = (groupId: string, color: string) => {
+    updateFavoriteGroup(groupId, { color });
+    setShowColorPicker(null);
+  };
+
+  const handleOpenRemarkModal = (itemId: string, currentRemark?: string) => {
+    setEditingRemarkItemId(itemId);
+    setRemarkText(currentRemark || "");
+    setShowRemarkModal(true);
+  };
+
+  const handleSaveRemark = () => {
+    if (!editingRemarkItemId) return;
+    setFavoriteItemRemark(editingRemarkItemId, remarkText.trim());
+    setShowRemarkModal(false);
+    setEditingRemarkItemId(null);
+    setRemarkText("");
+  };
+
+  const sortedGroups = groups.slice().sort((a, b) => a.order - b.order);
+
   return (
     <div className="h-full flex overflow-hidden app-transition" style={{ background: "var(--app-bg)" }}>
       <aside
@@ -182,158 +256,216 @@ export default function FavoritesPage() {
               新建
             </Button>
           </div>
-          <div className="relative">
-            <Search
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
-              style={{ color: "var(--app-text-tertiary)" }}
-            />
-            <input
-              type="text"
-              placeholder="搜索分组..."
-              className="mac-input pl-8 text-xs h-8 !py-1"
-            />
-          </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-0.5">
-          {groups
-            .slice()
-            .sort((a, b) => a.order - b.order)
-            .map((g) => {
-              const isActive = g.id === activeFavoriteGroupId;
-              const isEditing = editingGroup === g.id;
-              const isFG1 = g.id === "fg1";
-              const isDragOver = dragOverGroup === g.id && draggedItem;
+          {sortedGroups.map((g, idx) => {
+            const isActive = g.id === activeFavoriteGroupId;
+            const isEditing = editingGroup === g.id;
+            const isFG1 = g.id === "fg1";
+            const isDragOver = dragOverGroup === g.id && draggedItem;
+            const groupColor = g.color || DEFAULT_GROUP_COLOR;
 
-              return (
-                <div
-                  key={g.id}
-                  className={cn(
-                    "group relative rounded-lg transition-all",
-                    isDragOver && "ring-2 ring-[var(--app-accent)]"
-                  )}
-                  onDragOver={(e) => {
-                    if (draggedItem) {
-                      e.preventDefault();
-                      setDragOverGroup(g.id);
-                    }
-                  }}
-                  onDragLeave={() => setDragOverGroup(null)}
-                  onDrop={() => {
-                    if (draggedItem && !isFG1) {
-                      moveFavoriteItem(draggedItem, g.id);
-                    }
-                    setDraggedItem(null);
-                    setDragOverGroup(null);
-                  }}
-                >
-                  {isEditing ? (
-                    <div className="p-2">
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleRename();
-                          if (e.key === "Escape") setEditingGroup(null);
-                        }}
-                        autoFocus
-                        className="mac-input text-xs h-7 !py-1"
-                        style={{ paddingLeft: "28px" }}
-                      />
-                      <span
-                        className="absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full"
-                        style={{ background: g.color }}
-                      />
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setActiveFavoriteGroup(g.id)}
-                      className={cn(
-                        "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all relative",
-                        isActive
-                          ? "font-medium shadow-sm"
-                          : "hover:bg-black/5 dark:hover:bg-white/5"
-                      )}
+            return (
+              <div
+                key={g.id}
+                className={cn(
+                  "group relative rounded-lg transition-all",
+                  isDragOver && "ring-2 ring-[var(--app-accent)]"
+                )}
+                onDragOver={(e) => {
+                  if (draggedItem) {
+                    e.preventDefault();
+                    setDragOverGroup(g.id);
+                  }
+                }}
+                onDragLeave={() => setDragOverGroup(null)}
+                onDrop={() => {
+                  if (draggedItem && !isFG1) {
+                    moveFavoriteItem(draggedItem, g.id);
+                  }
+                  setDraggedItem(null);
+                  setDragOverGroup(null);
+                }}
+              >
+                {isEditing ? (
+                  <div className="p-2">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRename();
+                        if (e.key === "Escape") setEditingGroup(null);
+                      }}
+                      autoFocus
+                      className="mac-input text-xs h-7 !py-1"
+                      style={{ paddingLeft: "28px" }}
+                    />
+                    <span
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full"
+                      style={{ background: groupColor }}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setActiveFavoriteGroup(g.id)}
+                    className={cn(
+                      "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all relative",
+                      isActive
+                        ? "font-medium shadow-sm"
+                        : "hover:bg-black/5 dark:hover:bg-white/5"
+                    )}
+                    style={{
+                      background: isActive ? "var(--app-accent)" : "transparent",
+                      color: isActive ? "#fff" : "var(--app-text-secondary)",
+                    }}
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                       style={{
-                        background: isActive ? "var(--app-accent)" : "transparent",
-                        color: isActive ? "#fff" : "var(--app-text-secondary)",
+                        background: isActive ? "rgba(255,255,255,0.9)" : groupColor,
+                        boxShadow: isActive
+                          ? "0 0 0 2px rgba(255,255,255,0.3)"
+                          : "none",
+                      }}
+                    />
+                    <span
+                      className={cn(
+                        "flex-1 text-left truncate",
+                        draggedItem && isFG1 ? "" : ""
+                      )}
+                    >
+                      {g.name}
+                    </span>
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0"
+                      style={{
+                        background: isActive
+                          ? "rgba(255,255,255,0.25)"
+                          : "var(--app-surface-secondary)",
+                        color: isActive
+                          ? "#fff"
+                          : "var(--app-text-tertiary)",
                       }}
                     >
-                      <span
-                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                        style={{
-                          background: isActive ? "rgba(255,255,255,0.9)" : g.color,
-                          boxShadow: isActive
-                            ? "0 0 0 2px rgba(255,255,255,0.3)"
-                            : "none",
-                        }}
-                      />
-                      <span
-                        className={cn(
-                          "flex-1 text-left truncate",
-                          draggedItem && isFG1 ? "" : ""
-                        )}
-                      >
-                        {g.name}
-                      </span>
-                      <span
-                        className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0"
-                        style={{
-                          background: isActive
-                            ? "rgba(255,255,255,0.25)"
-                            : "var(--app-surface-secondary)",
-                          color: isActive
-                            ? "#fff"
-                            : "var(--app-text-tertiary)",
-                        }}
-                      >
-                        {g.itemCount}
-                      </span>
+                      {g.itemCount}
+                    </span>
 
-                      <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 bg-[var(--app-surface)] rounded-md shadow-sm p-0.5 z-10">
-                        {!isFG1 && (
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 bg-[var(--app-surface)] rounded-md shadow-sm p-0.5 z-10">
+                      {!isFG1 && idx > 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMoveGroupUp(idx);
+                          }}
+                          className="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                          style={{ color: "var(--app-text-secondary)" }}
+                          title="上移"
+                        >
+                          <ArrowUp className="w-3 h-3" />
+                        </button>
+                      )}
+                      {!isFG1 && idx < sortedGroups.length - 1 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMoveGroupDown(idx);
+                          }}
+                          className="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                          style={{ color: "var(--app-text-secondary)" }}
+                          title="下移"
+                        >
+                          <ArrowDown className="w-3 h-3" />
+                        </button>
+                      )}
+                      {!isFG1 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingGroup(g.id);
+                            setEditName(g.name);
+                          }}
+                          className="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                          style={{ color: "var(--app-text-secondary)" }}
+                          title="重命名"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      )}
+                      {!isFG1 && (
+                        <div className="relative">
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setEditingGroup(g.id);
-                              setEditName(g.name);
+                              setShowColorPicker(showColorPicker === g.id ? null : g.id);
                             }}
                             className="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
                             style={{ color: "var(--app-text-secondary)" }}
-                            title="重命名"
+                            title="更改颜色"
                           >
-                            <Pencil className="w-3 h-3" />
+                            <Palette className="w-3 h-3" />
                           </button>
-                        )}
-                        {!isFG1 && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (confirm(`确定删除分组"${g.name}"吗？`)) {
-                                deleteFavoriteGroup(g.id);
-                              }
-                            }}
-                            className={cn(
-                              "w-6 h-6 rounded flex items-center justify-center transition-colors",
-                              "hover:bg-[var(--app-danger)]/10"
-                            )}
-                            style={{ color: isFG1 ? "var(--app-text-tertiary)" : "var(--app-danger)" }}
-                            disabled={isFG1}
-                            title={isFG1 ? "默认分组不可删除" : "删除分组"}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+                          {showColorPicker === g.id && (
+                            <div
+                              className="absolute right-0 top-full mt-1 p-2 rounded-lg shadow-mac-lg z-20 grid grid-cols-6 gap-1.5"
+                              style={{
+                                background: "var(--app-surface)",
+                                border: "1px solid var(--app-border)",
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {GROUP_COLORS.map((c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => handleUpdateGroupColor(g.id, c)}
+                                  className={cn(
+                                    "w-5 h-5 rounded-full transition-all hover:scale-110",
+                                    groupColor === c && "ring-2 ring-offset-1 scale-110"
+                                  )}
+                                  style={{
+                                    background: c,
+                                    boxShadow:
+                                      groupColor === c ? `0 0 0 2px ${c}40` : "none",
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {!isFG1 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`确定删除分组"${g.name}"吗？`)) {
+                              deleteFavoriteGroup(g.id);
+                            }
+                          }}
+                          className={cn(
+                            "w-6 h-6 rounded flex items-center justify-center transition-colors",
+                            "hover:bg-[var(--app-danger)]/10"
+                          )}
+                          style={{ color: isFG1 ? "var(--app-text-tertiary)" : "var(--app-danger)" }}
+                          disabled={isFG1}
+                          title={isFG1 ? "默认分组不可删除" : "删除分组"}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </aside>
 
@@ -381,9 +513,19 @@ export default function FavoritesPage() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="搜索收藏内容..."
-                  className="mac-input pl-9 text-sm h-9 !py-1.5 w-56"
+                  placeholder="搜索标题、备注、作者..."
+                  className="mac-input pl-9 pr-8 text-sm h-9 !py-1.5 w-64"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center transition-colors hover:bg-black/10 dark:hover:bg-white/10"
+                    style={{ color: "var(--app-text-tertiary)" }}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
               </div>
 
               <Dropdown
@@ -595,6 +737,14 @@ export default function FavoritesPage() {
                             }
                             items={[
                               {
+                                key: "remark",
+                                label: "编辑备注",
+                                icon: <MessageSquare className="w-4 h-4" />,
+                                onClick: () => {
+                                  handleOpenRemarkModal(item.id, item.remark);
+                                },
+                              },
+                              {
                                 key: "move",
                                 label: "移动到分组",
                                 icon: <Move className="w-4 h-4" />,
@@ -632,14 +782,23 @@ export default function FavoritesPage() {
                         </h3>
 
                         <p
-                          className="text-xs line-clamp-2 mb-3"
+                          className="text-xs line-clamp-2 mb-2"
                           style={{ color: "var(--app-text-secondary)" }}
                         >
                           {post?.content
-                            ?.replace(/[#*`\[\]()>-]/g, "")
+                            ?.replace(/[#*`[\]()>-]/g, "")
                             .slice(0, 80) || reply?.content?.slice(0, 80)}
                           ...
                         </p>
+
+                        {item.remark && (
+                          <p
+                            className="text-xs italic line-clamp-2 mb-2"
+                            style={{ color: "var(--app-text-secondary)" }}
+                          >
+                            {item.remark}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -672,12 +831,32 @@ export default function FavoritesPage() {
                             {formatNumber(post.likeCount)}
                           </span>
                         )}
+                        {item.remark && (
+                          <span className="inline-flex items-center gap-0.5" title={item.remark}>
+                            <MessageSquare className="w-2.5 h-2.5" />
+                          </span>
+                        )}
                       </div>
+                    </div>
+
+                    <div className="pt-2 flex items-center justify-end">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenRemarkModal(item.id, item.remark);
+                        }}
+                        className="text-[10px] px-2 py-1 rounded-md transition-colors hover:bg-black/5 dark:hover:bg-white/5 opacity-0 group-hover:opacity-100"
+                        style={{ color: "var(--app-text-secondary)" }}
+                      >
+                        <MessageSquare className="w-3 h-3 inline mr-1" />
+                        {item.remark ? "编辑备注" : "添加备注"}
+                      </button>
                     </div>
 
                     {post && (
                       <div
-                        className="mt-3 pt-3 flex items-center justify-between"
+                        className="mt-2 pt-3 flex items-center justify-between"
                         style={{ borderTop: "1px solid var(--app-border)" }}
                       >
                         <span
@@ -848,7 +1027,7 @@ export default function FavoritesPage() {
               <span
                 className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                 style={{
-                  background: moveTargetGroup === g.id ? "rgba(255,255,255,0.9)" : g.color,
+                  background: moveTargetGroup === g.id ? "rgba(255,255,255,0.9)" : g.color || DEFAULT_GROUP_COLOR,
                 }}
               />
               <span className="flex-1 text-left">{g.name}</span>
@@ -922,7 +1101,7 @@ export default function FavoritesPage() {
                 <span
                   className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                   style={{
-                    background: isInGroup ? "rgba(255,255,255,0.9)" : g.color,
+                    background: isInGroup ? "rgba(255,255,255,0.9)" : g.color || DEFAULT_GROUP_COLOR,
                   }}
                 />
                 <span className="flex-1 text-left">{g.name}</span>
@@ -942,6 +1121,60 @@ export default function FavoritesPage() {
               </button>
             );
           })}
+        </div>
+      </Modal>
+
+      <Modal
+        open={showRemarkModal}
+        onClose={() => {
+          setShowRemarkModal(false);
+          setEditingRemarkItemId(null);
+          setRemarkText("");
+        }}
+        title={
+          <div className="flex items-center gap-2">
+            <MessageSquare className="w-5 h-5" style={{ color: "var(--app-accent)" }} />
+            编辑备注
+          </div>
+        }
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowRemarkModal(false);
+                setEditingRemarkItemId(null);
+                setRemarkText("");
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleSaveRemark}
+              leftIcon={<Pencil className="w-4 h-4" />}
+            >
+              保存
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <label className="block text-sm font-medium" style={{ color: "var(--app-text-primary)" }}>
+            备注内容
+          </label>
+          <textarea
+            value={remarkText}
+            onChange={(e) => setRemarkText(e.target.value)}
+            placeholder="添加备注，方便日后查找..."
+            rows={4}
+            className="mac-input resize-none"
+            autoFocus
+            maxLength={500}
+          />
+          <div className="text-right text-[10px]" style={{ color: "var(--app-text-tertiary)" }}>
+            {remarkText.length} / 500
+          </div>
         </div>
       </Modal>
     </div>

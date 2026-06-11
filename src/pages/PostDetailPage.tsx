@@ -9,6 +9,8 @@ import Dropdown from "@/components/ui/Dropdown";
 import type { DropdownItem } from "@/components/ui/Dropdown";
 import Empty from "@/components/ui/Empty";
 import Modal from "@/components/ui/Modal";
+import Tooltip from "@/components/ui/Tooltip";
+import Tabs from "@/components/ui/Tabs";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import {
   ArrowLeft,
@@ -34,26 +36,45 @@ import {
   Plus,
   Trash2,
   Settings,
+  Edit3,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Pencil,
 } from "lucide-react";
 import { cn, formatNumber, formatTime, getOSVersionLabel, getMacModelLabel } from "@/lib/utils";
 import type { Reply as ReplyType, Post } from "@/types";
 
+type ReplySortType = "latest" | "hot";
+
 function ReplyItem({
   reply,
   postId,
+  allReplies,
+  currentUserId,
   onReply,
   isHighlighted,
   onFloorClick,
 }: {
   reply: ReplyType;
   postId: string;
+  allReplies: ReplyType[];
+  currentUserId: string;
   onReply: (r: ReplyType) => void;
   isHighlighted?: boolean;
   onFloorClick?: (floor: number) => void;
 }) {
-  const { toggleBlockUser, setReportTarget, setProfileUserId } = useAppStore();
+  const { toggleBlockUser, setReportTarget, setProfileUserId, updateReply, deleteReply } = useAppStore();
   const [liked, setLiked] = useState(reply.isLiked || false);
   const [likeCount, setLikeCount] = useState(reply.likeCount);
+  const [expandedContext, setExpandedContext] = useState<Record<string, boolean>>({});
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(reply.content);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const replyToReply = reply.replyToId
+    ? allReplies.find((r) => r.id === reply.replyToId)
+    : undefined;
 
   const handleLike = () => {
     setLiked(!liked);
@@ -62,6 +83,26 @@ function ReplyItem({
 
   const handleMentionClick = (userId: string) => {
     setProfileUserId(userId);
+  };
+
+  const toggleContext = (replyId: string) => {
+    setExpandedContext((prev) => ({ ...prev, [replyId]: !prev[replyId] }));
+  };
+
+  const handleSaveEdit = () => {
+    if (!editContent.trim()) return;
+    updateReply(postId, reply.id, { content: editContent.trim() });
+    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditContent(reply.content);
+    setIsEditing(false);
+  };
+
+  const handleDelete = () => {
+    deleteReply(postId, reply.id);
+    setShowDeleteConfirm(false);
   };
 
   const renderContent = (content: string) => {
@@ -88,6 +129,151 @@ function ReplyItem({
       return <span key={idx}>{part}</span>;
     });
   };
+
+  const isOwnReply = reply.authorId === currentUserId;
+  const isContextExpanded = expandedContext[reply.id] || false;
+
+  const dropdownItems: DropdownItem[] = [
+    {
+      key: "reply",
+      label: "回复引用",
+      icon: <Reply className="w-4 h-4" />,
+      onClick: () => onReply(reply),
+    },
+  ];
+
+  if (isOwnReply && !reply.isDeleted) {
+    dropdownItems.push(
+      { key: "div1", label: "", divider: true } as DropdownItem,
+      {
+        key: "edit",
+        label: "编辑",
+        icon: <Edit3 className="w-4 h-4" />,
+        onClick: () => setIsEditing(true),
+      },
+      {
+        key: "delete",
+        label: "撤回",
+        icon: <Trash2 className="w-4 h-4" />,
+        danger: true,
+        onClick: () => setShowDeleteConfirm(true),
+      }
+    );
+  }
+
+  if (!isOwnReply) {
+    dropdownItems.push(
+      { key: "div2", label: "", divider: true } as DropdownItem,
+      {
+        key: "block",
+        label: `屏蔽 ${reply.author.nickname}`,
+        icon: <Ban className="w-4 h-4" />,
+        onClick: () =>
+          toggleBlockUser(reply.authorId, reply.author.nickname),
+      },
+      {
+        key: "report",
+        label: "举报",
+        icon: <Flag className="w-4 h-4" />,
+        danger: true,
+        onClick: () =>
+          setReportTarget({
+            type: "reply",
+            id: reply.id,
+            name: `${reply.author.nickname} 的回复`,
+          }),
+      }
+    );
+  }
+
+  if (reply.isDeleted) {
+    return (
+      <div
+        id={`floor-${reply.floor}`}
+        className={cn(
+          "scroll-mt-20 rounded-xl p-5 transition-all"
+        )}
+        style={{
+          background: "var(--app-surface)",
+          border: `1px solid var(--app-border)`,
+          opacity: 0.6,
+        }}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0">
+            <Avatar
+              src={reply.author.avatar}
+              name={reply.author.nickname}
+              size="md"
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className="text-sm font-semibold"
+                  style={{ color: "var(--app-text-tertiary)" }}
+                >
+                  {reply.author.nickname}
+                </span>
+                <span
+                  className="text-xs flex items-center gap-1"
+                  style={{ color: "var(--app-text-tertiary)" }}
+                >
+                  {formatTime(reply.createdAt)}
+                </span>
+              </div>
+              <span
+                className="text-xs px-2 py-1 rounded-md"
+                style={{ color: "var(--app-text-tertiary)" }}
+              >
+                #{reply.floor} 楼
+              </span>
+            </div>
+            <p
+              className="text-sm italic"
+              style={{ color: "var(--app-text-tertiary)" }}
+            >
+              该回复已被撤回
+              {reply.deletedAt && (
+                <Tooltip content={`撤回于 ${formatTime(reply.deletedAt)}`}>
+                  <span className="ml-1">· {formatTime(reply.deletedAt)}</span>
+                </Tooltip>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <Modal
+          open={showDeleteConfirm}
+          onClose={() => setShowDeleteConfirm(false)}
+          title="确认撤回回复"
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowDeleteConfirm(false)}
+              >
+                取消
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={handleDelete}
+              >
+                确认撤回
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm" style={{ color: "var(--app-text-secondary)" }}>
+            撤回后该回复将对所有人隐藏，且无法恢复。确定要撤回吗？
+          </p>
+        </Modal>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -148,6 +334,19 @@ function ReplyItem({
                   <CrownIcon className="w-3 h-3" /> 神回复
                 </Badge>
               )}
+              {reply.isEdited && (
+                <Tooltip content={reply.editedAt ? `编辑于 ${formatTime(reply.editedAt)}` : "已编辑"}>
+                  <span
+                    className="text-[10px] px-2 py-0.5 rounded-full"
+                    style={{
+                      background: "var(--app-surface-secondary)",
+                      color: "var(--app-text-tertiary)",
+                    }}
+                  >
+                    已编辑
+                  </span>
+                </Tooltip>
+              )}
               <span
                 className="text-xs flex items-center gap-1"
                 style={{ color: "var(--app-text-tertiary)" }}
@@ -173,82 +372,209 @@ function ReplyItem({
                     <MoreHorizontal className="w-4 h-4" />
                   </Button>
                 }
-                items={[
-                  {
-                    key: "reply",
-                    label: "回复引用",
-                    icon: <Reply className="w-4 h-4" />,
-                    onClick: () => onReply(reply),
-                  },
-                  {
-                    key: "block",
-                    label: `屏蔽 ${reply.author.nickname}`,
-                    icon: <Ban className="w-4 h-4" />,
-                    onClick: () =>
-                      toggleBlockUser(reply.authorId, reply.author.nickname),
-                  },
-                  {
-                    key: "report",
-                    label: "举报",
-                    icon: <Flag className="w-4 h-4" />,
-                    danger: true,
-                    onClick: () =>
-                      setReportTarget({
-                        type: "reply",
-                        id: reply.id,
-                        name: `${reply.author.nickname} 的回复`,
-                      }),
-                  },
-                ]}
+                items={dropdownItems}
                 placement="bottom-right"
               />
             </div>
           </div>
 
           {reply.replyToFloor && reply.replyToAuthor && (
-            <div
-              className="mb-3 p-3 rounded-lg text-sm"
-              style={{
-                background: "var(--app-surface-secondary)",
-                borderLeft: "3px solid var(--app-accent)",
-              }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <button
-                  type="button"
-                  onClick={() => setProfileUserId(reply.replyToAuthor!.id)}
-                  className="text-xs font-medium transition-opacity hover:opacity-80"
-                  style={{ color: "var(--app-accent)" }}
-                >
-                  @{reply.replyToAuthor.nickname}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => reply.replyToFloor && onFloorClick?.(reply.replyToFloor)}
-                  className="text-[10px] px-1.5 py-0.5 rounded"
+            <div className="mb-3">
+              <div
+                className="p-3 rounded-lg text-sm cursor-pointer transition-colors hover:opacity-90"
+                style={{
+                  background: "var(--app-surface-secondary)",
+                  borderLeft: "3px solid var(--app-accent)",
+                }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div
+                    className="flex-1 min-w-0"
+                    onClick={() => {
+                      if (replyToReply) {
+                        onFloorClick?.(reply.replyToFloor!);
+                      }
+                    }}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className="text-xs"
+                        style={{ color: "var(--app-text-secondary)" }}
+                      >
+                        回复
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setProfileUserId(reply.replyToAuthor!.id);
+                        }}
+                        className="text-xs font-medium transition-opacity hover:opacity-80"
+                        style={{ color: "var(--app-accent)" }}
+                      >
+                        @{reply.replyToAuthor.nickname}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (replyToReply) {
+                            onFloorClick?.(reply.replyToFloor!);
+                          }
+                        }}
+                        className="text-[10px] px-1.5 py-0.5 rounded"
+                        style={{
+                          background: "var(--app-border)",
+                          color: replyToReply ? "var(--app-text-secondary)" : "var(--app-text-tertiary)",
+                          cursor: replyToReply ? "pointer" : "default",
+                        }}
+                        disabled={!replyToReply}
+                      >
+                        #{reply.replyToFloor}
+                      </button>
+                    </div>
+                    {replyToReply ? (
+                      <p
+                        className="text-xs line-clamp-1"
+                        style={{ color: "var(--app-text-secondary)" }}
+                      >
+                        {replyToReply.content.length > 80
+                          ? replyToReply.content.slice(0, 80) + "..."
+                          : replyToReply.content}
+                      </p>
+                    ) : (
+                      <p
+                        className="text-xs"
+                        style={{ color: "var(--app-text-tertiary)" }}
+                      >
+                        该回复可能已被删除
+                      </p>
+                    )}
+                  </div>
+                  {replyToReply && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleContext(reply.id);
+                      }}
+                      className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-md transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                      style={{ color: "var(--app-text-secondary)" }}
+                    >
+                      {isContextExpanded ? (
+                        <>
+                          收起上下文
+                          <ChevronUp className="w-3 h-3" />
+                        </>
+                      ) : (
+                        <>
+                          展开上下文
+                          <ChevronDown className="w-3 h-3" />
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {isContextExpanded && replyToReply && (
+                <div
+                  className="mt-2 ml-4 p-3 rounded-lg text-sm"
                   style={{
-                    background: "var(--app-border)",
-                    color: "var(--app-text-secondary)",
+                    background: "var(--app-surface-secondary)",
+                    border: "1px solid var(--app-border)",
                   }}
                 >
-                  #{reply.replyToFloor}
-                </button>
-              </div>
-              <p
-                className="text-xs line-clamp-2"
-                style={{ color: "var(--app-text-secondary)" }}
-              >
-                {reply.content.slice(0, 100)}...
-              </p>
+                  <div className="flex items-center gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => setProfileUserId(replyToReply.authorId)}
+                      className="text-xs font-semibold transition-opacity hover:opacity-80"
+                      style={{ color: "var(--app-text-primary)" }}
+                    >
+                      {replyToReply.author.nickname}
+                    </button>
+                    <Badge variant="primary" size="sm">
+                      Lv.{replyToReply.author.level}
+                    </Badge>
+                    <button
+                      type="button"
+                      onClick={() => onFloorClick?.(replyToReply.floor)}
+                      className="text-[10px] px-1.5 py-0.5 rounded ml-auto"
+                      style={{
+                        background: "var(--app-border)",
+                        color: "var(--app-text-secondary)",
+                      }}
+                    >
+                      #{replyToReply.floor}
+                    </button>
+                  </div>
+                  <div
+                    className="text-xs leading-relaxed"
+                    style={{ color: "var(--app-text-secondary)" }}
+                  >
+                    {renderContent(replyToReply.content)}
+                  </div>
+                  <div
+                    className="mt-2 text-[10px]"
+                    style={{ color: "var(--app-text-tertiary)" }}
+                  >
+                    {formatTime(replyToReply.createdAt)}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          <div
-            className="text-sm leading-relaxed mb-3 prose prose-sm max-w-none"
-            style={{ color: "var(--app-text-primary)" }}
-          >
-            {renderContent(reply.content)}
-          </div>
+          {isEditing ? (
+            <div className="mb-3">
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="mac-input resize-none w-full"
+                style={{ minHeight: "100px" }}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    handleCancelEdit();
+                  }
+                }}
+              />
+              <div className="flex items-center justify-between mt-2">
+                <span
+                  className="text-[10px]"
+                  style={{ color: "var(--app-text-tertiary)" }}
+                >
+                  {editContent.length} / 5000
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<X className="w-3.5 h-3.5" />}
+                    onClick={handleCancelEdit}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleSaveEdit}
+                    disabled={!editContent.trim() || editContent === reply.content}
+                  >
+                    保存
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="text-sm leading-relaxed mb-3 prose prose-sm max-w-none"
+              style={{ color: "var(--app-text-primary)" }}
+            >
+              {renderContent(reply.content)}
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -279,6 +605,34 @@ function ReplyItem({
           </div>
         </div>
       </div>
+
+      <Modal
+        open={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title="确认撤回回复"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowDeleteConfirm(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={handleDelete}
+            >
+              确认撤回
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm" style={{ color: "var(--app-text-secondary)" }}>
+          撤回后该回复将对所有人隐藏，且无法恢复。确定要撤回吗？
+        </p>
+      </Modal>
     </div>
   );
 }
@@ -302,9 +656,11 @@ export default function PostDetailPage() {
     unfavoritePost,
     createFavoriteGroup,
     favoriteGroups,
+    favoriteItems,
     addReply,
     getBlockedUserIds,
     setActivePanel,
+    setFavoriteItemRemark,
   } = useAppStore();
 
   const post: Post | undefined = useMemo(
@@ -317,10 +673,20 @@ export default function PostDetailPage() {
     [post?.id, getRepliesByPostId]
   );
 
-  const replies = useMemo(
-    () => getFilteredReplies(allReplies),
-    [allReplies, getFilteredReplies]
-  );
+  const [replySort, setReplySort] = useState<ReplySortType>("latest");
+
+  const sortedReplies = useMemo(() => {
+    const filtered = getFilteredReplies(allReplies);
+    const sorted = [...filtered];
+    if (replySort === "latest") {
+      sorted.sort((a, b) => b.floor - a.floor);
+    } else {
+      sorted.sort((a, b) => b.likeCount - a.likeCount);
+    }
+    return sorted;
+  }, [allReplies, getFilteredReplies, replySort]);
+
+  const replies = sortedReplies;
 
   const favorited = post ? isPostFavorited(post.id) : false;
   const postFavGroups = post ? getPostFavoriteGroups(post.id) : [];
@@ -333,6 +699,9 @@ export default function PostDetailPage() {
   const [showBlockedPost, setShowBlockedPost] = useState(false);
   const [showNewGroupModal, setShowNewGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
+  const [showRemarkModal, setShowRemarkModal] = useState(false);
+  const [editingRemarkItemId, setEditingRemarkItemId] = useState<string | null>(null);
+  const [remarkText, setRemarkText] = useState("");
   const repliesEndRef = useRef<HTMLDivElement>(null);
 
   const isAuthorBlocked = post ? getBlockedUserIds().includes(post.authorId) : false;
@@ -396,6 +765,24 @@ export default function PostDetailPage() {
     setShowNewGroupModal(false);
   };
 
+  const handleOpenRemarkModal = (itemId: string, currentRemark?: string) => {
+    setEditingRemarkItemId(itemId);
+    setRemarkText(currentRemark || "");
+    setShowRemarkModal(true);
+  };
+
+  const handleSaveRemark = () => {
+    if (!editingRemarkItemId) return;
+    setFavoriteItemRemark(editingRemarkItemId, remarkText.trim());
+    setShowRemarkModal(false);
+    setEditingRemarkItemId(null);
+    setRemarkText("");
+  };
+
+  const getPostFavoriteItems = (postId: string) => {
+    return favoriteItems.filter((fi) => fi.targetId === postId);
+  };
+
   if (!post) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -403,6 +790,11 @@ export default function PostDetailPage() {
       </div>
     );
   }
+
+  const sortTabs = [
+    { key: "latest", label: "最新" },
+    { key: "hot", label: "最热" },
+  ];
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -670,33 +1062,53 @@ export default function PostDetailPage() {
                             { key: "div1", label: "", divider: true } as DropdownItem,
                           ]
                         : []),
-                      ...favoriteGroups.map<DropdownItem>((g) => ({
-                        key: g.id,
-                        label: (
-                          <span className="flex items-center gap-2">
-                            <span
-                              className="w-4 h-4 rounded border flex items-center justify-center"
-                              style={{
-                                borderColor: postFavGroups.includes(g.id) ? g.color : "var(--app-border)",
-                                background: postFavGroups.includes(g.id) ? g.color : "transparent",
-                              }}
-                            >
-                              {postFavGroups.includes(g.id) && (
-                                <span className="text-white text-[10px]">✓</span>
+                      ...favoriteGroups.map<DropdownItem>((g) => {
+                        const favItem = getPostFavoriteItems(post.id).find((fi) => fi.groupId === g.id);
+                        const hasRemark = !!favItem?.remark;
+                        return {
+                          key: g.id,
+                          label: (
+                            <span className="flex items-center gap-2 w-full">
+                              <span
+                                className="w-4 h-4 rounded border flex items-center justify-center flex-shrink-0"
+                                style={{
+                                  borderColor: postFavGroups.includes(g.id) ? g.color : "var(--app-border)",
+                                  background: postFavGroups.includes(g.id) ? g.color : "transparent",
+                                }}
+                              >
+                                {postFavGroups.includes(g.id) && (
+                                  <span className="text-white text-[10px]">✓</span>
+                                )}
+                              </span>
+                              <span
+                                className="w-2 h-2 rounded-full flex-shrink-0"
+                                style={{ background: g.color }}
+                              />
+                              <span className="flex-1 min-w-0 truncate">{g.name}</span>
+                              {hasRemark && postFavGroups.includes(g.id) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (favItem) {
+                                      handleOpenRemarkModal(favItem.id, favItem.remark);
+                                    }
+                                  }}
+                                  className="w-5 h-5 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5 flex-shrink-0"
+                                  style={{ color: "var(--app-text-secondary)" }}
+                                  title={favItem?.remark || "编辑备注"}
+                                >
+                                  <MessageSquare className="w-3 h-3" />
+                                </button>
                               )}
+                              <span className="text-[10px] flex-shrink-0" style={{ color: "var(--app-text-tertiary)" }}>
+                                {g.itemCount}
+                              </span>
                             </span>
-                            <span
-                              className="w-2 h-2 rounded-full"
-                              style={{ background: g.color }}
-                            />
-                            <span>{g.name}</span>
-                            <span className="ml-auto text-[10px]" style={{ color: "var(--app-text-tertiary)" }}>
-                              {g.itemCount}
-                            </span>
-                          </span>
-                        ),
-                        onClick: () => toggleFavoriteInGroup(post.id, g.id),
-                      })),
+                          ),
+                          onClick: () => toggleFavoriteInGroup(post.id, g.id),
+                        };
+                      }),
                       { key: "div2", label: "", divider: true } as DropdownItem,
                       {
                         key: "new-group",
@@ -783,28 +1195,84 @@ export default function PostDetailPage() {
                   className="mt-4 pt-4 text-xs"
                   style={{ borderTop: "1px solid var(--app-border)" }}
                 >
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span style={{ color: "var(--app-text-tertiary)" }}>
-                      已收藏到 {postFavGroups.length} 个分组：
-                    </span>
-                    {favoriteGroups
-                      .filter((g) => postFavGroups.includes(g.id))
-                      .map((g) => (
-                        <span
-                          key={g.id}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]"
-                          style={{
-                            background: `${g.color}15`,
-                            color: g.color,
-                          }}
-                        >
-                          <span
-                            className="w-1.5 h-1.5 rounded-full"
-                            style={{ background: g.color }}
-                          />
-                          {g.name}
-                        </span>
-                      ))}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span style={{ color: "var(--app-text-tertiary)" }}>
+                        已收藏到 {postFavGroups.length} 个分组：
+                      </span>
+                      {favoriteGroups
+                        .filter((g) => postFavGroups.includes(g.id))
+                        .map((g) => {
+                          const favItem = getPostFavoriteItems(post.id).find((fi) => fi.groupId === g.id);
+                          return (
+                            <span
+                              key={g.id}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]"
+                              style={{
+                                background: `${g.color}15`,
+                                color: g.color,
+                              }}
+                            >
+                              <span
+                                className="w-1.5 h-1.5 rounded-full"
+                                style={{ background: g.color }}
+                              />
+                              {g.name}
+                              {favItem?.remark && (
+                                <MessageSquare className="w-2.5 h-2.5 ml-0.5" />
+                              )}
+                            </span>
+                          );
+                        })}
+                    </div>
+                    {getPostFavoriteItems(post.id).some((fi) => fi.remark) && (
+                      <div className="space-y-1.5">
+                        {getPostFavoriteItems(post.id)
+                          .filter((fi) => fi.remark)
+                          .map((fi) => {
+                            const g = favoriteGroups.find((group) => group.id === fi.groupId);
+                            return (
+                              <div
+                                key={fi.id}
+                                className="flex items-start gap-2 p-2 rounded-lg"
+                                style={{
+                                  background: "var(--app-surface-secondary)",
+                                }}
+                              >
+                                <span
+                                  className="w-2 h-2 rounded-full mt-1 flex-shrink-0"
+                                  style={{ background: g?.color || "#007AFF" }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-0.5">
+                                    <span
+                                      className="text-[11px] font-medium"
+                                      style={{ color: g?.color || "var(--app-text-primary)" }}
+                                    >
+                                      {g?.name || "未分组"}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenRemarkModal(fi.id, fi.remark)}
+                                      className="w-4 h-4 rounded flex items-center justify-center transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                                      style={{ color: "var(--app-text-secondary)" }}
+                                      title="编辑备注"
+                                    >
+                                      <Pencil className="w-2.5 h-2.5" />
+                                    </button>
+                                  </div>
+                                  <p
+                                    className="text-[11px] italic line-clamp-2"
+                                    style={{ color: "var(--app-text-secondary)" }}
+                                  >
+                                    {fi.remark}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -826,25 +1294,13 @@ export default function PostDetailPage() {
                   {replies.length} 条
                 </span>
               </h3>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="text-xs px-3 py-1.5 rounded-lg transition-colors"
-                  style={{
-                    background: "var(--app-accent)",
-                    color: "#fff",
-                  }}
-                >
-                  最新
-                </button>
-                <button
-                  type="button"
-                  className="text-xs px-3 py-1.5 rounded-lg transition-colors hover:bg-black/5 dark:hover:bg-white/5"
-                  style={{ color: "var(--app-text-secondary)" }}
-                >
-                  最热
-                </button>
-              </div>
+              <Tabs
+                items={sortTabs}
+                activeKey={replySort}
+                onChange={(key) => setReplySort(key as ReplySortType)}
+                variant="pills"
+                size="sm"
+              />
             </div>
 
             {replies.length > 0 ? (
@@ -853,6 +1309,8 @@ export default function PostDetailPage() {
                   key={reply.id}
                   reply={reply}
                   postId={post.id}
+                  allReplies={allReplies}
+                  currentUserId={currentUser.id}
                   onReply={(r) => {
                     setReplyTo(r);
                     setReplyContent(`@${r.author.nickname} `);
@@ -1098,6 +1556,60 @@ export default function PostDetailPage() {
               }
             }}
           />
+        </div>
+      </Modal>
+
+      <Modal
+        open={showRemarkModal}
+        onClose={() => {
+          setShowRemarkModal(false);
+          setEditingRemarkItemId(null);
+          setRemarkText("");
+        }}
+        title={
+          <div className="flex items-center gap-2">
+            <MessageSquare className="w-5 h-5" style={{ color: "var(--app-accent)" }} />
+            编辑备注
+          </div>
+        }
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowRemarkModal(false);
+                setEditingRemarkItemId(null);
+                setRemarkText("");
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleSaveRemark}
+              leftIcon={<Pencil className="w-4 h-4" />}
+            >
+              保存
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <label className="block text-sm font-medium" style={{ color: "var(--app-text-primary)" }}>
+            备注内容
+          </label>
+          <textarea
+            value={remarkText}
+            onChange={(e) => setRemarkText(e.target.value)}
+            placeholder="添加备注，方便日后查找..."
+            rows={4}
+            className="mac-input resize-none"
+            autoFocus
+            maxLength={500}
+          />
+          <div className="text-right text-[10px]" style={{ color: "var(--app-text-tertiary)" }}>
+            {remarkText.length} / 500
+          </div>
         </div>
       </Modal>
     </div>
